@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Каталог сети — концепт</title>
+<style>
+:root{--bg:#111;--card:#1b1b1b;--line:#2c2c2c;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#ffd23f;--ac-tx:#111;--red:#e23b2b;--ok:#4cc26a;--warn:#e8a23a;--no:#777;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f4ee;--card:#fff;--line:#ddd8ca;--tx:#161616;--mut:#6b675c;--ac:#ffc800;--ok:#23913f;--warn:#b86f00;--no:#999}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:400 16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+#app{max-width:480px;margin:0 auto;padding:16px 16px 96px}
+h1,h2{font-family:Impact,"Arial Black",system-ui,sans-serif;font-weight:800;margin:0;letter-spacing:-.01em}
+h1{font-size:30px;line-height:1.1}
+h2{font-size:24px;margin:20px 0 14px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.top{display:flex;align-items:center;gap:10px;min-height:44px}
+.back{background:none;border:0;color:var(--ac);font-size:28px;padding:0 6px;line-height:1}
+.badge{margin-left:auto;font-size:13px;color:var(--mut)}
+.btn{display:block;width:100%;background:var(--ac);color:var(--ac-tx);border:2px solid var(--tx);border-radius:14px;padding:14px;font-weight:600;box-shadow:5px 5px 0 var(--red)}
+.btn.ghost{background:transparent;color:var(--tx);box-shadow:none;border-color:var(--line);margin-top:12px}
+.gate{padding-top:12vh}
+.gate p{color:var(--mut);margin:14px 0 28px}
+.row{display:flex;gap:10px;align-items:center}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;width:100%;text-align:left;display:block}
+.store b{display:block;font-size:17px}
+.store small{color:var(--mut)}
+.pill{display:inline-block;border-radius:99px;padding:2px 10px;font-size:13px;border:1px solid var(--line);color:var(--mut)}
+.pill.open{color:var(--ok);border-color:var(--ok)}
+.cats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cat{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:18px 14px;font-family:"Arial Black",system-ui,sans-serif;font-weight:600;font-size:15px;text-align:left;min-height:92px;display:flex;flex-direction:column;justify-content:space-between}
+.cat span{font:400 13px system-ui,sans-serif;color:var(--mut)}
+.cat:active{border-color:var(--ac)}
+input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px solid var(--tx);border-radius:14px;padding:13px 14px;font:inherit;box-shadow:5px 5px 0 var(--red);margin:6px 0 4px}
+.prod{display:flex;gap:12px}
+.pic{flex:0 0 76px;height:76px;border-radius:10px;display:grid;place-items:center;font:800 11px "Arial Black",system-ui,sans-serif;color:#111;text-align:center;padding:4px}
+.prod h3{margin:0 0 3px;font-size:16px}
+.meta{color:var(--mut);font-size:14px}
+.price{font:800 18px "Arial Black",system-ui,sans-serif;margin-top:6px}
+.av{margin-top:6px;font-size:14px;font-weight:600}
+.av.ok{color:var(--ok)}.av.low{color:var(--warn)}.av.no{color:var(--no)}
+.detail{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.detail div{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;border-bottom:1px dashed var(--line)}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
+.sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:13px}
+.sheet button.on{color:var(--ac);font-weight:600}
+.demo{font-size:12px;color:var(--mut);text-align:center;margin-top:24px}
+.empty{color:var(--mut);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const STORES=[
+["Беринга 10","10:00–22:00"],["пр. Ленина 45","10:00–22:00"],["ул. Воровского 12","10:00–21:00"],["Кольский пр. 112","10:00–22:00"],
+["ул. Софьи Перовской 18","11:00–21:00"],["ул. Зелёная 20","10:00–21:00"],["пр. Героев-североморцев 7","10:00–22:00"],["ул. Карла Маркса 9","10:00–21:00"],
+["ул. Книповича 35","11:00–21:00"],["ул. Капитана Орликовой 1","10:00–22:00"],["ул. Сафонова 24","10:00–21:00"],["ул. Шмидта 15","11:00–21:00"]
+];
+const CATS={
+"Одноразки":[
+["Dojo iMate X 40000","Затяжек: 40000 · Крепость: 5%",1290,"#7fd9d0"],
+["ELF BAR GH 23000","Затяжек: 23000 · Triple Mesh Coil",990,"#ff7a59"],
+["FUNKY LANDS × LOST MARY Sonic X 30000","3 режима, регулировка вкуса барабаном",1190,"#b9a5ff"]],
+"Жидкости":[
+["Жидкость Salt 30 мл, ягодный микс","Крепость: 2%",450,"#ff8fb1"],
+["Жидкость Salt 30 мл, цитрус","Крепость: 2%",450,"#ffd23f"],
+["Жидкость Classic 60 мл, тропик","Крепость: 3 мг",520,"#8be28b"]],
+"Под-системы":[
+["Под-система Basic, чёрная","Аккумулятор 1000 мАч",1900,"#cfcfcf"],
+["Под-система Pro, синяя","Аккумулятор 1500 мАч, регулировка мощности",2900,"#7aa7ff"]],
+"Кальянный табак":[
+["Табак для кальяна 200 г, мята","Крепкий",890,"#7fe3b0"],
+["Табак для кальяна 200 г, вишня","Лёгкий",890,"#e86a7a"]],
+"Расходники":[
+["Картридж для Pod, 2 шт.","Сопротивление 0,8 Ом",350,"#ffb347"],
+["Испаритель сменный, 5 шт.","Сопротивление 0,6 Ом",600,"#d0d0d0"]]
+};
+const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
+const $=s=>document.getElementById(s);
+function stock(si,pi,ci){const n=(si*7+pi*13+ci*5+3)%10;return n<2?["no","Нет в наличии"]:n<4?["low","Осталось мало"]:["ok","В наличии"]}
+function top(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?STORES[S.store][0]:""}</span></div>${title?`<h2>${title}</h2>`:""}`}
+function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
+function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
+function render(){
+let h="";
+if(S.step==="gate"){
+h=`<div class="gate"><h1>Каталог цен</h1><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+}else if(S.step==="stores"){
+h=top(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${s[0]}</b><small>Мурманск</small><div style="margin-top:8px"><span class="pill open">Открыто</span> <span class="pill">${s[1]}</span></div></button>`).join("");
+}else if(S.step==="cats"){
+h=top("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`<button class="cat" onclick="S.cat='${c}';go('list')">${c}<span>${CATS[c].length} товара</span></button>`).join("")}</div><button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
+}else if(S.step==="list"){
+const items=CATS[S.cat].map((p,i)=>({p,i})).filter(x=>x.p[0].toLowerCase().includes(S.q.toLowerCase()));
+const ci=Object.keys(CATS).indexOf(S.cat);
+h=top("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
+$("app").innerHTML=h+nav();list();return;
+}
+$("app").innerHTML=h+(S.step==="gate"?"":nav())+(S.step==="gate"?"":`<p class="demo">Концепт · демо-данные</p>`);
+}
+function list(){
+const ci=Object.keys(CATS).indexOf(S.cat);
+const items=CATS[S.cat].map((p,i)=>({p,i})).filter(x=>x.p[0].toLowerCase().includes(S.q.toLowerCase()));
+$("list").innerHTML=items.length?items.map(({p,i})=>{
+const [k,t]=stock(S.store,i,ci);
+const det=S.open===i?`<div class="detail">${STORES.map((s,si)=>{const [kk,tt]=stock(si,i,ci);return `<div><span>${s[0]}</span><span class="av ${kk}" style="margin:0">${tt}</span></div>`}).join("")}</div>`:"";
+return `<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽</div><div class="av ${k}">${t} здесь</div></div></div>${S.open===i?`<div class="meta" style="margin-top:10px">Наличие в других магазинах:</div>`+det:`<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть другие магазины</div>`}</button>`}).join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+}
+render();
+</script>
+</body>
+</html>
