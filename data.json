@@ -1,0 +1,27 @@
+{
+  "updated": "2026-11-15T14:00:00+03:00",
+  "stores": ["Баумана", "ГУМ", "Мир"],
+  "categories": [
+    {
+      "name": "Одноразовые сигареты",
+      "items": [
+        {
+          "name": "ELFBAR GH 23000",
+          "meta": "Затяжек: 23000",
+          "price": 1190,
+          "flavors": [
+            {"name": "Клубника-киви", "stores": [0, 2]},
+            {"name": "Виноград", "stores": [1]},
+            {"name": "Кола", "stores": []}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Картриджи",
+      "items": [
+        {"name": "VAPORESSO XROS 2 мл, 0,6 Ом", "meta": "Картридж Vaporesso", "price": 350, "stores": [0, 1, 2]}
+      ]
+    }
+  ]
+}

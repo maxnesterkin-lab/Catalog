@@ -92,11 +92,24 @@ const POOL={
 "Картриджи":null
 };
 /* true — у цен и наличия стоит пометка «пример». Когда внесёте настоящие цены, поставьте false */
-const DEMO=true;
+let DEMO=true;
+let REAL=null;
 /* ===== конец данных ===== */
 const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
 const $=s=>document.getElementById(s);
-function has(si,pi,fi,ci){return (si*7+pi*13+fi*11+ci*5+3)%10>=4}
+function has(si,pi,fi,ci){if(REAL){return REAL.st[Object.keys(CATS)[ci]][pi][fi].includes(si)}return (si*7+pi*13+fi*11+ci*5+3)%10>=4}
+function applyData(d){
+STORES.length=0;d.stores.forEach(s=>STORES.push(s));
+Object.keys(CATS).forEach(k=>delete CATS[k]);
+REAL={fl:{},st:{}};
+d.categories.forEach(c=>{
+CATS[c.name]=c.items.map(it=>[it.name,it.meta||"",it.price,it.color||"#d0d0d0"]);
+REAL.fl[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.name):[""]);
+REAL.st[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.stores||[]):[it.stores||[]]);
+});
+DEMO=false;S.store=null;S.cat=null;S.open=null;S.q="";
+if(S.step!=="gate")go("stores");
+}
 function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?"SV "+STORES[S.store]:""}</span></div>${title?`<h2>${title}</h2>`:""}`}
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
@@ -116,10 +129,11 @@ $("app").innerHTML=h+nav();list();return;
 $("app").innerHTML=h+nav()+`<p class="demo">${DEMO?"Концепт · цены и наличие — демо-данные":""}</p>`;
 }
 function list(){
-const ci=Object.keys(CATS).indexOf(S.cat),fl=POOL[S.cat]||[""],q=S.q.trim().toLowerCase();
-const all=fl.map((f,fi)=>({f,fi}));
+const ci=Object.keys(CATS).indexOf(S.cat),q=S.q.trim().toLowerCase();
 const html=[];
 CATS[S.cat].forEach((p,i)=>{
+const fl=REAL?REAL.fl[S.cat][i]:(POOL[S.cat]||[""]);
+const all=fl.map((f,fi)=>({f,fi}));
 const nameHit=p[0].toLowerCase().includes(q);
 const fHit=all.filter(x=>x.f&&x.f.toLowerCase().includes(q));
 if(q&&!nameHit&&!fHit.length)return;
@@ -138,6 +152,7 @@ html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()">
 $("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
 }
 render();
+fetch("data.json",{cache:"no-store"}).then(r=>r.ok?r.json():Promise.reject()).then(applyData).catch(()=>{});
 </script>
 </body>
 </html>
