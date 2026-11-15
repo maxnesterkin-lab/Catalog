@@ -81,7 +81,7 @@ const CATS={
 const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
 const $=s=>document.getElementById(s);
 function stock(si,pi,ci){const n=(si*7+pi*13+ci*5+3)%10;return n<2?["no","Нет в наличии"]:n<4?["low","Осталось мало"]:["ok","В наличии"]}
-function top(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?STORES[S.store][0]:""}</span></div>${title?`<h2>${title}</h2>`:""}`}
+function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?STORES[S.store][0]:""}</span></div>${title?`<h2>${title}</h2>`:""}`}
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
 function render(){
@@ -89,13 +89,13 @@ let h="";
 if(S.step==="gate"){
 h=`<div class="gate"><h1>Каталог цен</h1><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
 }else if(S.step==="stores"){
-h=top(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${s[0]}</b><small>Мурманск</small><div style="margin-top:8px"><span class="pill open">Открыто</span> <span class="pill">${s[1]}</span></div></button>`).join("");
+h=bar(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${s[0]}</b><small>Мурманск</small><div style="margin-top:8px"><span class="pill open">Открыто</span> <span class="pill">${s[1]}</span></div></button>`).join("");
 }else if(S.step==="cats"){
-h=top("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`<button class="cat" onclick="S.cat='${c}';go('list')">${c}<span>${CATS[c].length} товара</span></button>`).join("")}</div><button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
+h=bar("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`<button class="cat" onclick="S.cat='${c}';go('list')">${c}<span>${CATS[c].length} товара</span></button>`).join("")}</div><button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
 }else if(S.step==="list"){
 const items=CATS[S.cat].map((p,i)=>({p,i})).filter(x=>x.p[0].toLowerCase().includes(S.q.toLowerCase()));
 const ci=Object.keys(CATS).indexOf(S.cat);
-h=top("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
+h=bar("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
 $("app").innerHTML=h+nav();list();return;
 }
 $("app").innerHTML=h+(S.step==="gate"?"":nav())+(S.step==="gate"?"":`<p class="demo">Концепт · демо-данные</p>`);
