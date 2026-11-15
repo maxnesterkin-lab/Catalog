@@ -28,3 +28,4 @@ jobs:
         with:
           commit_message: "Auto-update prices and stock from Saby API"
           file_pattern: data.json
+
