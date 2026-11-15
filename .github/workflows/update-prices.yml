@@ -2,8 +2,11 @@ name: Update Saby Retail Data
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # Запускать каждые 2 часа (можно изменить)
-  workflow_dispatch:      # Кнопка ручного запуска прямо на сайте GitHub
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   update-data:
@@ -20,12 +23,10 @@ jobs:
       - name: Run script to fetch data from Saby
         env:
           SABY_TOKEN: ${{ secrets.SABY_TOKEN }}
-        run: |
-          node update-script.js
+        run: node update-script.js
 
       - name: Commit and push if data changed
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Auto-update prices and stock from Saby API"
           file_pattern: data.json
-
