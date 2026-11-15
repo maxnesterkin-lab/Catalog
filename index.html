@@ -36,10 +36,11 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 .prod h3{margin:0 0 3px;font-size:16px;line-height:1.25}
 .meta{color:var(--mut);font-size:14px}
 .price{font:800 18px Impact,"Arial Black",sans-serif;margin-top:6px}
+.tag{font:600 11px system-ui,sans-serif;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:8px;vertical-align:middle}
 .av{margin-top:6px;font-size:14px;font-weight:600}
-.av.ok{color:var(--ok)}.av.low{color:var(--warn)}.av.no{color:var(--no)}
+.av.ok{color:var(--ok)}.av.no{color:var(--no)}
 .detail{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
-.detail div{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;border-bottom:1px dashed var(--line)}
+.fl{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:15px}
 .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
 .sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:14px}
 .sheet button.on{color:var(--tx);font-weight:700}
@@ -84,10 +85,18 @@ const CATS={
 ["VAPORESSO LUXE X MESH 5 мл, 0,4 Ом","Картридж Vaporesso",420,"#7aa7ff"],
 ["VAPORESSO OSMALL 2 мл, 1,2 Ом","Картридж Vaporesso",340,"#e0e0e0"]]
 };
+/* вкусы по категориям (для картриджей вкусов нет) */
+const POOL={
+"Одноразовые сигареты":["Клубника-киви","Виноград","Манго","Кола","Мятная жвачка","Черника-малина","Арбуз","Персик-лёд"],
+"Ароматизаторы":["Клубника","Кола-вишня","Тропик","Энергетик","Ментол"],
+"Картриджи":null
+};
+/* true — у цен и наличия стоит пометка «пример». Когда внесёте настоящие цены, поставьте false */
+const DEMO=true;
 /* ===== конец данных ===== */
 const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
 const $=s=>document.getElementById(s);
-function stock(si,pi,ci){const n=(si*7+pi*13+ci*5+3)%10;return n<2?["no","Нет в наличии"]:n<4?["low","Осталось мало"]:["ok","В наличии"]}
+function has(si,pi,fi,ci){return (si*7+pi*13+fi*11+ci*5+3)%10>=4}
 function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?"SV "+STORES[S.store]:""}</span></div>${title?`<h2>${title}</h2>`:""}`}
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
@@ -104,15 +113,29 @@ h=bar("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`
 h=bar("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
 $("app").innerHTML=h+nav();list();return;
 }
-$("app").innerHTML=h+nav()+`<p class="demo">Концепт · цены и наличие — демо-данные</p>`;
+$("app").innerHTML=h+nav()+`<p class="demo">${DEMO?"Концепт · цены и наличие — демо-данные":""}</p>`;
 }
 function list(){
-const ci=Object.keys(CATS).indexOf(S.cat);
-const items=CATS[S.cat].map((p,i)=>({p,i})).filter(x=>x.p[0].toLowerCase().includes(S.q.toLowerCase()));
-$("list").innerHTML=items.length?items.map(({p,i})=>{
-const [k,t]=stock(S.store,i,ci);
-const det=S.open===i?`<div class="detail">${STORES.map((s,si)=>{const [kk,tt]=stock(si,i,ci);return `<div><span>SV ${s}</span><span class="av ${kk}" style="margin:0">${tt}</span></div>`}).join("")}</div>`:"";
-return `<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽</div><div class="av ${k}">${t} здесь</div></div></div>${S.open===i?`<div class="meta" style="margin-top:10px">Наличие в других магазинах:</div>`+det:`<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть другие магазины</div>`}</button>`}).join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+const ci=Object.keys(CATS).indexOf(S.cat),fl=POOL[S.cat]||[""],q=S.q.trim().toLowerCase();
+const all=fl.map((f,fi)=>({f,fi}));
+const html=[];
+CATS[S.cat].forEach((p,i)=>{
+const nameHit=p[0].toLowerCase().includes(q);
+const fHit=all.filter(x=>x.f&&x.f.toLowerCase().includes(q));
+if(q&&!nameHit&&!fHit.length)return;
+const rows=(q&&!nameHit)?fHit:all;
+const n=all.filter(x=>has(S.store,i,x.fi,ci)).length;
+const opened=S.open===i||(q&&!nameHit);
+const k=n?"ok":"no";
+const t=fl[0]===""?(n?"В наличии здесь":"Нет в наличии здесь"):(n?`В наличии здесь: ${n} из ${fl.length} вкусов`:"Нет в наличии здесь");
+let body=`<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть ${fl[0]===""?"другие магазины":"вкусы и другие магазины"}</div>`;
+if(opened){body='<div class="detail">'+rows.map(({f,fi})=>{
+const here=has(S.store,i,fi,ci);
+const others=STORES.filter((s,si)=>si!==S.store&&has(si,i,fi,ci));
+return `<div class="fl"><div>${f?`<b>${f}</b>`:"Другие магазины"}<div class="meta">${others.length?"Есть ещё: "+others.join(", "):"В других магазинах нет"}</div></div><span class="av ${here?"ok":"no"}" style="margin:0;white-space:nowrap">${here?"Есть здесь":"Нет здесь"}</span></div>`}).join("")+"</div>"}
+html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
+});
+$("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
 }
 render();
 </script>
