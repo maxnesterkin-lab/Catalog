@@ -94,6 +94,19 @@ async function api(url) {
     throw new Error(lastError || "запрос не удался");
 }
 
+// Saby иногда отдаёт nomenclatures не массивом (например, одиночным объектом) -- приводим к массиву
+let shapeLogged = false;
+function toArray(v) {
+    if (Array.isArray(v)) return v;
+    if (v === null || v === undefined || v === "") return [];
+    if (!shapeLogged) {
+        shapeLogged = true;
+        console.log("ПРЕДУПРЕЖДЕНИЕ: nomenclatures пришло не массивом, тип: " + typeof v + ", пример: " + JSON.stringify(v).slice(0, 200));
+    }
+    if (typeof v === "object") return ("id" in v || "name" in v) ? [v] : Object.values(v).filter(x => x && typeof x === "object");
+    return [];
+}
+
 function listUrl(pointId, folderId, size, page, withBalance = true) {
     return `${BASE}/v2/nomenclature/list?pointId=${pointId}&withBalance=${withBalance}&pageSize=${size}&page=${page}` +
         (folderId ? `&folder=${folderId}` : "");
@@ -114,14 +127,14 @@ async function fetchPaged(pointId, folderId, size, tolerant, name) {
             let nm = "?";
             try {
                 const r2 = await api(listUrl(pointId, folderId, size, page, false));
-                nm = (r2.nomenclatures || []).map(x => x.name).join("; ");
+                nm = toArray(r2.nomenclatures).map(x => x.name).join("; ");
             } catch (_) { /* название узнать не удалось */ }
             console.log(`ПРЕДУПРЕЖДЕНИЕ: раздел «${name}», позиция пропущена (Saby не отдаёт остаток): ${nm}`);
             if (misses >= 5) throw e;
             continue;
         }
-        const arr = res.nomenclatures || [];
-        all.push(...arr);
+        const arr = toArray(res.nomenclatures);
+        for (const x of arr) all.push(x);
         if (!(res.outcome && res.outcome.hasMore) || arr.length === 0) break;
     }
     return all;
