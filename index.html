@@ -56,16 +56,6 @@ fetch('data.json')
     window.CATS = data.categories;
     render();
   });
-const POOL={
-/* true — у цен и наличия стоит пометка «пример». Когда внесёте настоящие цены, поставьте false */
-let DEMO=true;
-let REAL=null;
-let UPDATED="";
-/* ===== конец данных ===== */
-const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
-const $=s=>document.getElementById(s);
-function has(si,pi,fi,ci){if(REAL){return REAL.st[Object.keys(CATS)[ci]][pi][fi].includes(si)}return (si*7+pi*13+fi*11+ci*5+3)%10>=4}
-function applyData(d){
 if(!d||!d.categories||!d.categories.length)return;
 STORES.length=0;d.stores.forEach(s=>STORES.push(s));
 Object.keys(CATS).forEach(k=>delete CATS[k]);
