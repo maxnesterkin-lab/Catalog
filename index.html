@@ -57,7 +57,6 @@ fetch('data.json')
   .then(data => {
     window.CATS = data.categories;
     render();
-  });
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
 function render(){
