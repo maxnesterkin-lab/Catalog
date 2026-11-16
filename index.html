@@ -94,7 +94,7 @@ const here=has(S.store,i,fi,ci);
 const others=STORES.filter((s,si)=>si!==S.store&&has(si,i,fi,ci));
 return `<div class="fl"><div>${f?`<b>${f}</b>`:"Другие магазины"}<div class="meta">${others.length?"Есть ещё: "+others.join(", "):"В других магазинах нет"}</div></div><span class="av ${here?"ok":"no"}" style="margin:0;white-space:nowrap">${here?"Есть здесь":"Нет здесь"}</span></div>`}).join("")+"</div>"}
 html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
-}
+});
 $("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
 }
 render();
