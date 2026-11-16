@@ -272,6 +272,8 @@ async function main() {
     console.log(`Папок с товарами: ${leafFolders.length}`);
 
     // 3. Остатки по остальным магазинам
+    const MAX_STALE_SHARE = 0.05;                    // сколько разделов магазина можно не прочитать (доля)
+    const stale = stores.map(() => new Set());       // индекс магазина -> разделы, чьи остатки взяты из прошлого data.json
     for (let si = 0; si < stores.length; si++) {
         if (si === structIdx) continue;
         let failed = [];
@@ -289,15 +291,32 @@ async function main() {
             await sleep(5000);
             const still = [];
             for (const folder of failed) {
-                try { await load(folder); } catch (e) { still.push(folder.name + ": " + e.message); }
+                try { await load(folder); } catch (e) { still.push({ folder, msg: folder.name + ": " + e.message }); }
                 await sleep(PAUSE_MS);
             }
-            if (still.length) fail(`остатки ${stores[si].name} получены не полностью (${still.length} разделов), data.json не изменён. Пример: ${still[0]}`);
+            if (still.length > Math.max(5, Math.ceil(leafFolders.length * MAX_STALE_SHARE))) {
+                fail(`остатки ${stores[si].name} получены не полностью (${still.length} разделов), data.json не изменён. Пример: ${still[0].msg}`);
+            }
+            for (const x of still) {
+                stale[si].add(x.folder.hid);
+                console.log(`ПРЕДУПРЕЖДЕНИЕ: ${stores[si].name}, раздел «${x.folder.name}» не прочитан, остатки взяты из прошлого data.json`);
+            }
         }
         console.log(`Остатки: ${stores[si].name} готово`);
     }
 
     // 4. Сборка data.json
+    // прошлые остатки: «раздел|вкус» -> множество названий магазинов (для разделов, которые Saby не отдал)
+    const prevStock = new Map();
+    try {
+        const prev = JSON.parse(fs.readFileSync("data.json", "utf-8"));
+        const prevNames = (prev.stores || []).map(x => typeof x === "string" ? x : x.name);
+        if (Array.isArray(prev.categories)) {
+            for (const c of prev.categories) for (const it of (c.items || [])) for (const f of (it.flavors || [])) {
+                prevStock.set(it.name + "|" + f.name, new Set((f.stores || []).map(i => prevNames[i])));
+            }
+        }
+    } catch (e) { /* прошлых данных нет */ }
     const categories = [];
     let totalFlavors = 0;
     for (const root of rootsUsed.slice().sort(byName)) {
@@ -313,7 +332,13 @@ async function main() {
                     color: colorFor(node.name),
                     flavors: leaves.map(l => ({
                         name: cleanFlavor(l.name, node.name),
-                        stores: stores.map((s, si) => (balances[si].get(l.id) || 0) > 0 ? si : -1).filter(x => x >= 0)
+                        stores: stores.map((s, si) => {
+                            if (stale[si].has(node.hid)) {
+                                const ps = prevStock.get(node.name + "|" + cleanFlavor(l.name, node.name));
+                                return ps && ps.has(s.name) ? si : -1;
+                            }
+                            return (balances[si].get(l.id) || 0) > 0 ? si : -1;
+                        }).filter(x => x >= 0)
                     }))
                 });
                 totalFlavors += leaves.length;
