@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SEVERVAPE — каталог</title>
+<style>
+:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:400 16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+#app{max-width:480px;margin:0 auto;padding:16px 16px 96px}
+h2{font:800 26px/1.15 Impact,"Arial Black",system-ui,sans-serif;margin:20px 0 14px;letter-spacing:.01em}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--sh);outline-offset:2px}
+.top{display:flex;align-items:center;gap:10px;min-height:44px}
+.back{background:none;border:0;color:var(--tx);font-size:30px;padding:0 8px 0 0;line-height:1}
+.badge{margin-left:auto;font-size:13px;color:var(--mut)}
+.btn{display:block;width:100%;background:var(--ac);color:var(--ac-tx);border:2px solid var(--ac);border-radius:14px;padding:14px;font-weight:700;box-shadow:5px 5px 0 var(--sh)}
+.btn.ghost{background:transparent;color:var(--tx);box-shadow:none;border-color:var(--line);margin-top:14px}
+.gate{padding-top:6vh;text-align:center}
+.gate img{width:100%;max-width:340px;border-radius:12px;display:block;margin:0 auto 20px}
+.gate p{color:var(--mut);margin:0 0 26px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;width:100%;text-align:left;display:block}
+.store b{display:block;font-size:17px}
+.store small{color:var(--mut)}
+.cats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cat{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px 14px;font:700 15px/1.2 system-ui,sans-serif;text-align:left;min-height:96px;display:flex;flex-direction:column;justify-content:space-between}
+.cat span{font:400 13px system-ui,sans-serif;color:var(--mut)}
+.cat:active{border-color:var(--sh)}
+input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px solid var(--ac);border-radius:14px;padding:13px 14px;font:inherit;box-shadow:5px 5px 0 var(--sh);margin:6px 0 16px}
+.prod{display:flex;gap:12px}
+.pic{flex:0 0 72px;height:72px;border-radius:10px;display:grid;place-items:center;font:800 11px/1.1 Impact,"Arial Black",sans-serif;color:#000;text-align:center;padding:4px;overflow:hidden}
+.prod h3{margin:0 0 3px;font-size:16px;line-height:1.25}
+.meta{color:var(--mut);font-size:14px}
+.price{font:800 18px Impact,"Arial Black",sans-serif;margin-top:6px}
+.tag{font:600 11px system-ui,sans-serif;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:8px;vertical-align:middle}
+.av{margin-top:6px;font-size:14px;font-weight:600}
+.av.ok{color:var(--ok)}.av.no{color:var(--no)}
+.detail{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
+.fl{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:15px}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
+.sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:14px}
+.sheet button.on{color:var(--tx);font-weight:700}
+.demo{font-size:12px;color:var(--mut);text-align:center;margin-top:24px}
+.empty{color:var(--mut);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+let S={step:"gate",tab:"catalog",store:null,cat:null,q:"",open:null};
+let STORES=[],CATS={},REAL=null,POOL={},UPDATED="",DEMO=true,ADDR={};
+function $(id){return document.getElementById(id)}
+function sn(s){return s.split(" (")[0]}
+function bar(backStep,title){return `<div class="top"><button class="back" onclick="go('${backStep}')">←</button><h2>${title}</h2></div>`}
+function has(si,pi,fi,ci){
+    if(!REAL)return true;
+    const m=REAL. stores[si];
+    if(!m)return false;
+    const catName=Object.keys(CATS)[ci];
+    if(!catName||!REAL.fl[catName])return false;
+    const fName=REAL.fl[catName][pi]?REAL.fl[catName][pi][fi]:null;
+    if(fName===undefined)return false;
+    return m.includes(fName);
+}
+function applyData(d){
+    STORES=d.stores;
+    CATS=d.categories;
+    REAL=d.real||null;
+    POOL=d.pool||{};
+    UPDATED=d.updated||"";
+    DEMO=false;
+    ADDR=d.addr||{};
+    if(S.step!=="gate")render();
+}
+fetch('data.json')
+  .then(response => response.json())
+  .then(data => {
+    window.STORES = data.stores;
+    window.CATS = data.categories;
+    render();
+  })
+  .catch(error => console.error('Ошибка загрузки данных:', error));
+
+function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
+function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
+function render(){
+let h="";
+if(S.step==="gate"){
+h=`<div class="gate"><img alt="SEVERVAPE — сеть магазинов" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAEuAaQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAWEPwD5tooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAO68E/8gWb/ruf/QVoo8E/8gWb/ruf/QVooA4WiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA7rwT/yBZv+u5/9BWijwT/yBZv+u5/9BWigDhaKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvSfg38HLrx/qkWp6rDJBoFvIGZnG03BHOxQf51yvw98EXni7xhpmnNaXTafLcL59xHExREHJycccCvpnxf8dNF8J6jY+G9GgXVbi1kWBzF8sUYBA47GgDtPFGjWWs+E77TLuBPss1uyBAPu4HGK+H7q1ks7ua2mUrLE5RlPYg4NfenjHxfa+HvBd9rVxdwxbLdmid3ADOVOCPrmvg25uZbu4lnnkaSWUl3dzkkk5JNAEVFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAd14J/5As3/AG7P/oK0UeCf+QLN/wBuz/6CtFAH//2Q=="><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+$("app").innerHTML=h;return;
+}else if(S.step==="stores"){
+h=bar(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${sn(s)}</b><small>${ADDR[s]||""}</small></button>`).join("");
+}else if(S.step==="cats"){
+h=bar("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`<button class="cat" onclick="S.cat='${c}';go('list')">${c}<span>${CATS[c].length} поз.</span></button>`).join("")}</div><button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
+}else if(S.step==="list"){
+h=bar("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
+$("app").innerHTML=h+nav();list();return;
+}
+$("app").innerHTML=h+nav()+`<p class="demo">${DEMO?"Концепт · цены и наличие — демо-данные":(UPDATED?"Данные обновлены: "+UPDATED+". Наличие уточняйте в магазине.":"")}</p>`;
+}
+function list(){
+const ci=Object.keys(CATS).indexOf(S.cat),q=S.q.trim().toLowerCase();
+const html=[];
+CATS[S.cat].forEach((p,i)=>{
+const fl=REAL?REAL.fl[S.cat][i]:(POOL[S.cat]||[""]);
+const all=fl.map((f,fi)=>({f,fi}));
+const nameHit=p[0].toLowerCase().includes(q);
+const fHit=all.filter(x=>x.f&&x.f.toLowerCase().includes(q));
+if(q&&!nameHit&&!fHit.length)return;
+const rows=(q&&!nameHit)?fHit:all;
+const n=all.filter(x=>has(S.store,i,x.fi,ci)).length;
+const opened=S.open===i||(q&&!nameHit);
+const k=n?"ok":"no";
+const t=fl[0]===""?(n?"В наличии здесь":"Нет в наличии здесь"):(n?`В наличии здесь: ${n} из ${fl.length} вкусов`:"Нет в наличии здесь");
+let body=`<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть ${fl[0]===""?"другие магазины":"вкусы и другие магазины"}</div>`;
+if(opened){body='<div class="detail">'+rows.map(({f,fi})=>{
+const here=has(S.store,i,fi,ci);
+const others=STORES.filter((s,si)=>si!==S.store&&has(si,i,fi,ci));
+return `<div class="fl"><div>${f?`<b>${f}</b>`:"Другие магазины"}<div class="meta">${others.length?"Есть ещё: "+others.join(", "):"В других магазинах нет"}</div></div><span class="av ${here?"ok":"no"}" style="margin:0;white-space:nowrap">${here?"Есть здесь":"Нет здесь"}</span></div>`}).join("")+"</div>"}
+html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
+});
+$("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+}
+render();
+</script></body>
+</html>
