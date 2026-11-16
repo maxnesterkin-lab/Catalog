@@ -1,3 +1,4 @@
+
 name: Update Saby Retail Data
 
 on:
@@ -22,7 +23,9 @@ jobs:
 
       - name: Run script to fetch data from Saby
         env:
-          SABY_TOKEN: ${{ secrets.SABY_TOKEN }}
+          SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
+          SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
+          SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: node update-script.js
 
       - name: Commit and push if data changed
