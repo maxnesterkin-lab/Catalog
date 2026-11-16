@@ -50,14 +50,14 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 <body>
 <div id="app"></div>
 <script>
-let S={step:"gate",tab:"catalog",store:null,cat:null,q:"",open:null};
-let STORES=[],CATS={},REAL=null,POOL={},UPDATED="",DEMO=true,ADDR={};
+let S = {step: "gate", tab: "catalog", store: null, cat: null, q: "", open: null};
+let STORES = [], CATS = {}, REAL = null, POOL = {}, UPDATED = "", DEMO = true, ADDR = {};
 function $(id){return document.getElementById(id)}
 function sn(s){return s.split(" (")[0]}
 function bar(backStep,title){return `<div class="top"><button class="back" onclick="go('${backStep}')">←</button><h2>${title}</h2></div>`}
 function has(si,pi,fi,ci){
     if(!REAL)return true;
-    const m=REAL. stores[si];
+    const m=REAL.stores[si];
     if(!m)return false;
     const catName=Object.keys(CATS)[ci];
     if(!catName||!REAL.fl[catName])return false;
@@ -89,7 +89,7 @@ function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on
 function render(){
 let h="";
 if(S.step==="gate"){
-h=`<div class="gate"><img alt="SEVERVAPE — сеть магазинов" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAEuAaQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAWEPwD5tooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAO68E/8gWb/ruf/QVoo8E/8gWb/ruf/QVooA4WiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA7rwT/yBZv+u5/9BWijwT/yBZv+u5/9BWigDhaKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvSfg38HLrx/qkWp6rDJBoFvIGZnG03BHOxQf51yvw98EXni7xhpmnNaXTafLcL59xHExREHJycccCvpnxf8dNF8J6jY+G9GgXVbi1kWBzF8sUYBA47GgDtPFGjWWs+E77TLuBPss1uyBAPu4HGK+H7q1ks7ua2mUrLE5RlPYg4NfenjHxfa+HvBd9rVxdwxbLdmid3ADOVOCPrmvg25uZbu4lnnkaSWUl3dzkkk5JNAEVFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAd14J/5As3/AG7P/oK0UeCf+QLN/wBuz/6CtFAH//2Q=="><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+h=`<div class="gate"><img alt="SEVERVAPE — сеть магазинов" src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAcFBQYFBAcGBgYIBwcICxILCwoKCxYPEA0SGhYbGhkWGRgcICgiHB4mHhgZIzAkJiorLS4tGyIyNTEsNSgsLSz/2wBDAQcICAsJCxULCxUsHRkdLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCwsLCz/wAARCAEuAaQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAWEPwD5tooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAO68E/8gWb/ruf/QVoo8E/8gWb/ruf/QVooA4WiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA7rwT/yBZv+u5/9BWijwT/yBZv+u5/9BWigDhaKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACvSfg38HLrx/qkWp6rDJBoFvIGZnG03BHOxQf51yvw98EXni7xhpmnNaXTafLcL59xHExREHJycccCvpnxf8dNF8J6jY+G9GgXVbi1kWBzF8sUYBA47GgDtPFGjWWs+E77TLuBPss1uyBAPu4HGK+H7q1ks7ua2mUrLE5RlPYg4NfenjHxfa+HvBd9rVxdwxbLdmid3ADOVOCPrmvg25uZbu4lnnkaSWUl3dzkkk5JNAEVFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUAd14J/5As3/AG7P/oK0UeCf+QLN/wBuz/6CtFAH//2Q=="><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
 $("app").innerHTML=h;return;
 }else if(S.step==="stores"){
 h=bar(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${sn(s)}</b><small>${ADDR[s]||""}</small></button>`).join("");
