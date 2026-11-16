@@ -49,6 +49,8 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 </head>
 <body>
 <div id="app"></div>
+ let S = {step: "gate", tab: "catalog", store: null, cat: null, q: "", open: null};
+let STORES = [], CATS = {}, REAL = null, POOL = {}, UPDATED = "", DEMO = true, ADDR = {};
 <script>
 fetch('data.json')
   .then(response => response.json())
