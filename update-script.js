@@ -14,7 +14,9 @@ const BASE = "https://api.sbis.ru/retail";
 const STRUCTURE_STORE = "Баумана";                       // по нему читаем структуру каталога и цены
 const STORE_ORDER = ["Баумана", "ГУМ", "Гаджиева", "КТМ", "Крупской", "Книповича", "Кольский", "Ленина", "Мир", "ПЗ", "Североморск"];
 const EXCLUDE_ROOTS = ["вывод из ассортимента"];         // служебные разделы, которые не показываем
-const CONCURRENCY = 5;
+const CONCURRENCY = 2;                                   // меньше параллельных запросов, чтобы Saby не перегружать
+const PAUSE_MS = 150;                                    // пауза после каждого запроса
+let lastError = "";
 let PAGE_SIZE = 100;
 let requests = 0;
 let headers = {};
@@ -47,11 +49,18 @@ async function api(url) {
         try {
             res = await fetch(url, { headers });
         } catch (e) {
+            lastError = "сеть: " + ((e.cause && e.cause.code) || e.message);
             await sleep(1500 * attempt);
             continue;
         }
         if (res.status === 401 && !relogged) { await login(); relogged = true; continue; }
-        if (res.status === 429 || res.status >= 500) { await sleep(2000 * attempt); continue; }
+        if (res.status === 429 || res.status >= 500) {
+            const body = (await res.text()).slice(0, 150);
+            lastError = `HTTP ${res.status} ${body}`;
+            const retryAfter = Number(res.headers.get("retry-after")) || 0;
+            await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
+            continue;
+        }
         const text = await res.text();
         if (!res.ok) {
             const err = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
@@ -60,7 +69,7 @@ async function api(url) {
         }
         return JSON.parse(text);
     }
-    throw new Error("запрос не удался после повторов: " + url.split("?")[0]);
+    throw new Error(lastError || "запрос не удался");
 }
 
 // все записи одного раздела (с постраничной подгрузкой)
@@ -89,6 +98,7 @@ async function pool(items, n, worker) {
         while (i < items.length) {
             const item = items[i++];
             await worker(item);
+            await sleep(PAUSE_MS);
         }
     }));
 }
@@ -141,12 +151,21 @@ async function main() {
     const roots = [];
     const balances = stores.map(() => new Map());   // индекс магазина -> (id товара -> остаток)
     const structIdx = stores.indexOf(structStore);
+    const walkFailures = [];
     let frontier = [null];
     let level = 0;
     while (frontier.length) {
         const next = [];
         await pool(frontier, CONCURRENCY, async fid => {
-            const arr = await fetchFolder(structStore.id, fid);
+            let arr;
+            try {
+                arr = await fetchFolder(structStore.id, fid);
+            } catch (e) {
+                const nm = fid === null ? "корень" : nodes.get(fid).name;
+                walkFailures.push(nm);
+                console.log(`ПРЕДУПРЕЖДЕНИЕ: не удалось прочитать раздел «${nm}»: ${e.message}`);
+                return;
+            }
             for (const it of arr) {
                 if (it.isParent) {
                     const hid = it.hierarchicalId != null ? it.hierarchicalId : it.id;
@@ -166,6 +185,9 @@ async function main() {
         frontier = next;
     }
 
+    if (walkFailures.length > Math.max(3, nodes.size * 0.05)) {
+        fail(`слишком много разделов не прочитано (${walkFailures.length}), data.json не изменён`);
+    }
     const rootsUsed = roots.filter(r => !EXCLUDE_ROOTS.includes(r.name.trim().toLowerCase()));
     console.log(`Корневых разделов: ${roots.length}, показываем: ${rootsUsed.length}`);
 
@@ -182,12 +204,26 @@ async function main() {
     // 3. Остатки по остальным магазинам
     for (let si = 0; si < stores.length; si++) {
         if (si === structIdx) continue;
-        await pool(leafFolders, CONCURRENCY, async folder => {
+        let failed = [];
+        const load = async folder => {
             const arr = await fetchFolder(stores[si].id, folder.hid);
             for (const it of arr) {
                 if (!it.isParent) balances[si].set(it.id, Number(it.balance) || 0);
             }
+        };
+        await pool(leafFolders, CONCURRENCY, async folder => {
+            try { await load(folder); } catch (e) { failed.push(folder); }
         });
+        if (failed.length) {
+            console.log(`Остатки ${stores[si].name}: повтор для ${failed.length} разделов`);
+            await sleep(5000);
+            const still = [];
+            for (const folder of failed) {
+                try { await load(folder); } catch (e) { still.push(folder.name + ": " + e.message); }
+                await sleep(PAUSE_MS);
+            }
+            if (still.length) fail(`остатки ${stores[si].name} получены не полностью (${still.length} разделов), data.json не изменён. Пример: ${still[0]}`);
+        }
         console.log(`Остатки: ${stores[si].name} готово`);
     }
 
