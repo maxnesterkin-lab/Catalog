@@ -44,31 +44,40 @@ async function login() {
 // запрос с повторами при перегрузке и повторным входом, если токен истёк
 async function api(url) {
     let relogged = false;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-        requests++;
-        let res;
-        try {
-            res = await fetch(url, { headers });
-        } catch (e) {
-            lastError = "сеть: " + ((e.cause && e.cause.code) || e.message);
-            await sleep(1500 * attempt);
-            continue;
-        }
-        if (res.status === 401 && !relogged) { await login(); relogged = true; continue; }
-        if (res.status === 429) {
-            lastError = "HTTP 429 слишком частые запросы";
-            const retryAfter = Number(res.headers.get("retry-after")) || 0;
-            await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
-            continue;
-        }
-        if (res.status >= 500) {
-            const body = (await res.text()).slice(0, 200);
-            lastError = `HTTP ${res.status} ${body}`;
-            if (attempt < 2) { await sleep(1000); continue; }
-            const err = new Error(lastError);
-            err.status = res.status;
-            throw err;
-        }
+   
+try {
+      res = await fetch(url, { headers });
+    } catch (e) {
+      lastError = "сеть: " + (e.cause && e.cause.code || e.message);
+      if (attempt < 5) {
+        await sleep(1500 * attempt);
+        continue;
+      }
+      console.warn("Ошибка загрузки, пропускаем:", lastError);
+      return null;
+    }
+
+    if (res.status === 401 && !relogged && (await login())) {
+      relogged = true;
+      continue;
+    }
+    if (res.status === 429) {
+      lastError = "HTTP 429 слишком частые запросы";
+      const retryAfter = Number(res.headers.get("retry-after")) || 0;
+      await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
+      continue;
+    }
+
+    if (res.status >= 500) {
+      const body = await res.text().slice(0, 200);
+      lastError = `HTTP ${res.status} ${body}`;
+      if (attempt < 5) {
+        await sleep(1000 * attempt);
+        continue;
+      }
+      console.warn("Ошибка сервера, пропускаем:", lastError);
+      return null;
+    }
         const text = await res.text();
         if (!res.ok) {
             const err = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
