@@ -56,15 +56,6 @@ fetch('data.json')
     window.CATS = data.categories;
     render();
   });
-function sn(s){return s==="Североморск"?s:"SV "+s}
-/* товар: [название, описание, цена ₽, цвет] */
-const CATS={
-fetch('data.json')
-  .then(response => response.json())
-  .then(data => {
-    window.CATS = data.categories;
-    render();
-  });
 const POOL={
 /* true — у цен и наличия стоит пометка «пример». Когда внесёте настоящие цены, поставьте false */
 let DEMO=true;
