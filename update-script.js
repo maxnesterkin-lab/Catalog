@@ -39,46 +39,51 @@ async function login() {
     const token = data.token || data.access_token;
     if (!token) fail("в ответе на вход нет токена");
     headers = { "X-SBISAccessToken": token };
+    return true;
 }
 
 // запрос с повторами при перегрузке и повторным входом, если токен истёк
 async function api(url) {
     let relogged = false;
-   
-try {
-      res = await fetch(url, { headers });
-    } catch (e) {
-      lastError = "сеть: " + (e.cause && e.cause.code || e.message);
-      if (attempt < 5) {
-        await sleep(1500 * attempt);
-        continue;
-      }
-      console.warn("Ошибка загрузки, пропускаем:", lastError);
-      return null;
-    }
+    for (let attempt = 1; attempt <= 5; attempt++) {
+        let res;
+        requests++;
+        try {
+            res = await fetch(url, { headers });
+        } catch (e) {
+            lastError = "сеть: " + ((e.cause && e.cause.code) || e.message);
+            if (attempt < 5) {
+                await sleep(1500 * attempt);
+                continue;
+            }
+            throw new Error(lastError);
+        }
 
-    if (res.status === 401 && !relogged && (await login())) {
-      relogged = true;
-      continue;
-    }
-    if (res.status === 429) {
-      lastError = "HTTP 429 слишком частые запросы";
-      const retryAfter = Number(res.headers.get("retry-after")) || 0;
-      await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
-      continue;
-    }
+        if (res.status === 401 && !relogged) {
+            await login();
+            relogged = true;
+            attempt--;                       // повторный вход не считаем попыткой
+            continue;
+        }
+        if (res.status === 429) {
+            lastError = "HTTP 429 слишком частые запросы";
+            const retryAfter = Number(res.headers.get("retry-after")) || 0;
+            await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
+            continue;
+        }
 
-    if (res.status >= 500) {
-      const body = await res.text().slice(0, 200);
-      lastError = `HTTP ${res.status} ${body}`;
-      if (attempt < 5) {
-        await sleep(1000 * attempt);
-        continue;
-      }
-      console.warn("Ошибка сервера, пропускаем:", lastError);
-      return null;
-    }
         const text = await res.text();
+        if (res.status >= 500) {
+            lastError = `HTTP ${res.status} ${text.slice(0, 200)}`;
+            if (attempt < 5) {
+                await sleep(1000 * attempt);
+                continue;
+            }
+            // статус сохраняем: fetchFolder по нему попробует страницы поменьше
+            const err = new Error(lastError);
+            err.status = res.status;
+            throw err;
+        }
         if (!res.ok) {
             const err = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
             err.status = res.status;

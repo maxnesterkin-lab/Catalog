@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEVERVAPE — каталог</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -20,7 +21,8 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sh);outline-off
 .btn{display:block;width:100%;background:var(--ac);color:var(--ac-tx);border:2px solid var(--ac);border-radius:14px;padding:14px;font-weight:700;box-shadow:5px 5px 0 var(--sh)}
 .btn.ghost{background:transparent;color:var(--tx);box-shadow:none;border-color:var(--line);margin-top:14px}
 .gate{padding-top:6vh;text-align:center}
-.gate img{width:100%;max-width:340px;border-radius:12px;display:block;margin:0 auto 20px}
+.gate h1{font:800 40px/1.1 Impact,"Arial Black",system-ui,sans-serif;margin:0 0 6px;letter-spacing:.02em}
+.gate .sub{color:var(--sh);font-weight:700;margin:0 0 22px;letter-spacing:.12em;font-size:13px}
 .gate p{color:var(--mut);margin:0 0 26px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;width:100%;text-align:left;display:block}
 .store b{display:block;font-size:17px}
@@ -43,6 +45,7 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
 .sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:14px}
 .sheet button.on{color:var(--tx);font-weight:700}
+.err{color:var(--warn)}
 .demo{font-size:12px;color:var(--mut);text-align:center;margin-top:24px}
 .empty{color:var(--mut);text-align:center;padding:40px 0}
 </style>
@@ -50,79 +53,143 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 <body>
 <div id="app"></div>
 <script>
-let S = {step: "gate", tab: "catalog", store: null, cat: null, q: "", open: null};
-let STORES = [], CATS = {}, REAL = null, POOL = {}, UPDATED = "", DEMO = true, ADDR = {};
-function $(id){return document.getElementById(id)}
-function sn(s){return s.split(" (")[0]}
-function bar(backStep,title){return `<div class="top"><button class="back" onclick="go('${backStep}')">←</button><h2>${title}</h2></div>`}
-function has(si,pi,fi,ci){
-    if(!REAL)return true;
-    const m=REAL.stores[si];
-    if(!m)return false;
-    const catName=Object.keys(CATS)[ci];
-    if(!catName||!REAL.fl[catName])return false;
-    const fName=REAL.fl[catName][pi]?REAL.fl[catName][pi][fi]:null;
-    if(fName===undefined)return false;
-    return m.includes(fName);
-}
-function applyData(d){
-    STORES=d.stores;
-    CATS=d.categories;
-    REAL=d.real||null;
-    POOL=d.pool||{};
-    UPDATED=d.updated||"";
-    DEMO=false;
-    ADDR=d.addr||{};
-    if(S.step!=="gate")render();
-}
-fetch('data.json')
-  .then(response => response.json())
-  .then(data => {
-    window.STORES = data.stores;
-    window.CATS = data.categories;
-    render();
-  })
-  .catch(error => console.error('Ошибка загрузки данных:', error));
+// ---------- Telegram Mini App ----------
+const tg = window.Telegram && window.Telegram.WebApp;
+try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor("#0a0b10"); tg.setBackgroundColor("#0a0b10"); } } catch (e) {}
 
-function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
-function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
-function render(){
-let h="";
-if(S.step==="gate"){
-h=`<div class="gate"><img alt="SEVERVAPE — сеть магазинов" src="IMG_6551.jpeg"><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="go('stores')">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
-}else if(S.step==="stores"){
-h=bar(null,"Магазины")+STORES.map((s,i)=>`<button class="card store" onclick="S.store=${i};S.tab='catalog';go('cats')"><b>${sn(s)}</b><small>${ADDR[s]||""}</small></button>`).join("");
-}else if(S.step==="cats"){
-h=bar("stores","Каталог")+`<div class="cats">${Object.keys(CATS).map(c=>`<button class="cat" onclick="S.cat='${c}';go('list')">${c}<span>${CATS[c].length} поз.</span></button>`).join("")}</div><button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
-}else if(S.step==="list"){
-h=bar("cats",S.cat)+`<input type="search" id="q" placeholder="Поиск" value="${S.q}" oninput="S.q=this.value;list()"><div id="list"></div>`;
-$("app").innerHTML=h+nav();list();return;
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const $ = id => document.getElementById(id);
+
+// ---------- Состояние ----------
+// D — данные из data.json (их обновляет update-script.js из Saby):
+// { updated, stores: ["Баумана", ...], categories: [{ name, items: [{ name, meta, price, color, flavors: [{ name, stores: [индексы магазинов] }] }] }] }
+let D = { stores: [], categories: [], updated: "", addr: {} };
+let S = { step: LS.get("age18") === "1" ? "stores" : "gate", tab: "catalog", store: null, cat: null, q: "", open: null, status: "loading" };
+const BACK = { cats: "stores", list: "cats" };
+
+function normalize(d) {
+  const stores = (d.stores || []).map(s => typeof s === "string" ? { name: s } : { name: s.name, hours: s.hours });
+  const categories = Array.isArray(d.categories) ? d.categories : [];
+  return {
+    stores,
+    updated: d.updated || "",
+    addr: d.addr || {},
+    categories: categories.map(c => ({
+      name: c.name || "",
+      items: (c.items || []).map(it => ({
+        name: it.name || "", meta: it.meta || "", price: Number(it.price) || 0, color: it.color || "#9fd8ff",
+        flavors: (it.flavors || []).map(f => ({ name: f.name || "", stores: Array.isArray(f.stores) ? f.stores : [] }))
+      }))
+    }))
+  };
 }
-$("app").innerHTML=h+nav()+`<p class="demo">${DEMO?"Концепт · цены и наличие — демо-данные":(UPDATED?"Данные обновлены: "+UPDATED+". Наличие уточняйте в магазине.":"")}</p>`;
+
+function load() {
+  S.status = "loading"; render();
+  fetch("data.json", { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(data => {
+      D = normalize(data);
+      const saved = parseInt(LS.get("store"), 10);
+      if (S.store === null && saved >= 0 && saved < D.stores.length) S.store = saved;
+      if (S.step === "stores" && S.store !== null) S.step = "cats";
+      S.status = "ok"; render();
+    })
+    .catch(e => { console.error("Ошибка загрузки данных:", e); S.status = "error"; render(); });
 }
-function list(){
-const ci=Object.keys(CATS).indexOf(S.cat),q=S.q.trim().toLowerCase();
-const html=[];
-CATS[S.cat].forEach((p,i)=>{
-const fl=REAL?REAL.fl[S.cat][i]:(POOL[S.cat]||[""]);
-const all=fl.map((f,fi)=>({f,fi}));
-const nameHit=p[0].toLowerCase().includes(q);
-const fHit=all.filter(x=>x.f&&x.f.toLowerCase().includes(q));
-if(q&&!nameHit&&!fHit.length)return;
-const rows=(q&&!nameHit)?fHit:all;
-const n=all.filter(x=>has(S.store,i,x.fi,ci)).length;
-const opened=S.open===i||(q&&!nameHit);
-const k=n?"ok":"no";
-const t=fl[0]===""?(n?"В наличии здесь":"Нет в наличии здесь"):(n?`В наличии здесь: ${n} из ${fl.length} вкусов`:"Нет в наличии здесь");
-let body=`<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть ${fl[0]===""?"другие магазины":"вкусы и другие магазины"}</div>`;
-if(opened){body='<div class="detail">'+rows.map(({f,fi})=>{
-const here=has(S.store,i,fi,ci);
-const others=STORES.filter((s,si)=>si!==S.store&&has(si,i,fi,ci));
-return `<div class="fl"><div>${f?`<b>${f}</b>`:"Другие магазины"}<div class="meta">${others.length?"Есть ещё: "+others.join(", "):"В других магазинах нет"}</div></div><span class="av ${here?"ok":"no"}" style="margin:0;white-space:nowrap">${here?"Есть здесь":"Нет здесь"}</span></div>`}).join("")+"</div>"}
-html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
-});
-$("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+
+// ---------- Навигация ----------
+function go(step) {
+  S.step = step; S.open = null;
+  if (step === "cats") S.q = "";
+  render(); window.scrollTo(0, 0);
 }
+function pickStore(i) { S.store = i; S.tab = "catalog"; LS.set("store", i); go("cats"); }
+function pickCat(i) { S.cat = i; go("list"); }
+function toggleItem(i) { S.open = S.open === i ? null : i; renderList(); }
+function adult() { LS.set("age18", "1"); go(S.store === null ? "stores" : "cats"); }
+
+try { if (tg && tg.BackButton) tg.BackButton.onClick(() => { if (BACK[S.step]) go(BACK[S.step]); }); } catch (e) {}
+function syncBack() {
+  try { if (tg && tg.BackButton) { if (BACK[S.step] && S.status === "ok") tg.BackButton.show(); else tg.BackButton.hide(); } } catch (e) {}
+}
+
+// ---------- Отрисовка ----------
+function bar(backStep, title) {
+  return `<div class="top">${backStep ? `<button class="back" aria-label="Назад" onclick="go('${backStep}')">←</button>` : ""}<h2>${esc(title)}</h2></div>`;
+}
+function nav() {
+  return `<nav class="sheet"><button class="${S.tab === "catalog" ? "on" : ""}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab === "stores" ? "on" : ""}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`;
+}
+function fmtDate(iso) {
+  try { return new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " (МСК)"; }
+  catch (e) { return iso; }
+}
+function foot() {
+  return `<p class="demo">${D.updated ? "Данные обновлены: " + esc(fmtDate(D.updated)) + ". Наличие уточняйте в магазине." : "Концепт · цены и наличие — демо-данные"}</p>`;
+}
+
+function render() {
+  let h = "";
+  if (S.step === "gate") {
+    h = `<div class="gate"><h1>SEVERVAPE</h1><div class="sub">СЕТЬ МАГАЗИНОВ</div><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="adult()">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+    $("app").innerHTML = h; syncBack(); return;
+  }
+  if (S.status === "loading") {
+    $("app").innerHTML = `<div class="empty">Загрузка каталога…</div>`; syncBack(); return;
+  }
+  if (S.status === "error") {
+    $("app").innerHTML = `<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>`; syncBack(); return;
+  }
+  if (S.step !== "stores" && S.store === null) S.step = "stores";
+  if (S.step === "list" && !D.categories[S.cat]) S.step = "cats";
+
+  if (S.step === "stores") {
+    h = bar(null, "Магазины") + (D.stores.length ? D.stores.map((s, i) => {
+      const sub = [s.hours, D.addr[s.name]].filter(Boolean).join(" · ");
+      return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store === i ? ' <span class="tag">выбран</span>' : ""}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+    }).join("") : `<div class="empty">Список магазинов пуст.</div>`);
+  } else if (S.step === "cats") {
+    h = bar("stores", D.stores[S.store].name) + (D.categories.length
+      ? `<div class="cats">${D.categories.map((c, i) => `<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} поз.</span></button>`).join("")}</div>`
+      : `<div class="empty">Каталог пока пуст.</div>`)
+      + `<button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
+  } else if (S.step === "list") {
+    h = bar("cats", D.categories[S.cat].name) + `<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
+  }
+  $("app").innerHTML = h + nav() + foot();
+  if (S.step === "list") renderList();
+  syncBack();
+}
+
+function renderList() {
+  const cat = D.categories[S.cat], q = S.q.trim().toLowerCase(), out = [];
+  cat.items.forEach((p, i) => {
+    const all = p.flavors.map((f, fi) => ({ f, fi, here: f.stores.includes(S.store) }));
+    const nameHit = p.name.toLowerCase().includes(q);
+    const fHit = q ? all.filter(x => x.f.name.toLowerCase().includes(q)) : all;
+    if (q && !nameHit && !fHit.length) return;
+    const rows = (q && !nameHit) ? fHit : all;
+    const n = all.filter(x => x.here).length;
+    const opened = S.open === i || (q && !nameHit);
+    const label = n ? `В наличии здесь: ${n} из ${all.length} вкусов` : "Нет в наличии здесь";
+    let body = `<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>`;
+    if (opened) {
+      body = '<div class="detail">' + rows.slice().sort((a, b) => b.here - a.here).map(({ f, here }) => {
+        const others = D.stores.map((s, si) => si).filter(si => si !== S.store && f.stores.includes(si)).map(si => D.stores[si].name);
+        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${others.length ? "Есть ещё: " + esc(others.join(", ")) : "В других магазинах нет"}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${here ? "Есть здесь" : "Нет здесь"}</span></div>`;
+      }).join("") + "</div>";
+    }
+    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(" ")[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta ? `<div class="meta">${esc(p.meta)}</div>` : ""}${p.price ? `<div class="price">${p.price} ₽</div>` : ""}<div class="av ${n ? "ok" : "no"}">${label}</div></div></div>${body}</button>`);
+  });
+  $("list").innerHTML = out.length ? out.join("") : `<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+}
+
 render();
+load();
 </script></body>
 </html>
