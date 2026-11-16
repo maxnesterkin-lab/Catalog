@@ -17,7 +17,8 @@ const EXCLUDE_ROOTS = ["вывод из ассортимента"];         // �
 const CONCURRENCY = 2;                                   // меньше параллельных запросов, чтобы Saby не перегружать
 const PAUSE_MS = 150;                                    // пауза после каждого запроса
 let lastError = "";
-let PAGE_SIZE = 100;
+const PAGE_SIZE = 30;
+const folderSize = new Map();                            // разделам, которые не читаются обычным запросом, запоминаем рабочий размер страницы
 let requests = 0;
 let headers = {};
 
@@ -54,12 +55,19 @@ async function api(url) {
             continue;
         }
         if (res.status === 401 && !relogged) { await login(); relogged = true; continue; }
-        if (res.status === 429 || res.status >= 500) {
-            const body = (await res.text()).slice(0, 150);
-            lastError = `HTTP ${res.status} ${body}`;
+        if (res.status === 429) {
+            lastError = "HTTP 429 слишком частые запросы";
             const retryAfter = Number(res.headers.get("retry-after")) || 0;
             await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
             continue;
+        }
+        if (res.status >= 500) {
+            const body = (await res.text()).slice(0, 200);
+            lastError = `HTTP ${res.status} ${body}`;
+            if (attempt < 2) { await sleep(1000); continue; }
+            const err = new Error(lastError);
+            err.status = res.status;
+            throw err;
         }
         const text = await res.text();
         if (!res.ok) {
@@ -72,24 +80,59 @@ async function api(url) {
     throw new Error(lastError || "запрос не удался");
 }
 
-// все записи одного раздела (с постраничной подгрузкой)
-async function fetchFolder(pointId, folderId) {
+function listUrl(pointId, folderId, size, page, withBalance = true) {
+    return `${BASE}/v2/nomenclature/list?pointId=${pointId}&withBalance=${withBalance}&pageSize=${size}&page=${page}` +
+        (folderId ? `&folder=${folderId}` : "");
+}
+
+// чтение раздела постранично; при tolerant=true позиции, на которых Saby падает, пропускаются
+async function fetchPaged(pointId, folderId, size, tolerant, name) {
     const all = [];
-    for (let page = 0; page < 300; page++) {
-        const url = `${BASE}/v2/nomenclature/list?pointId=${pointId}&withBalance=true&pageSize=${PAGE_SIZE}&page=${page}` +
-            (folderId ? `&folder=${folderId}` : "");
+    let misses = 0;
+    for (let page = 0; page < 3000; page++) {
         let res;
         try {
-            res = await api(url);
+            res = await api(listUrl(pointId, folderId, size, page));
+            misses = 0;
         } catch (e) {
-            if (e.status === 400 && PAGE_SIZE > 30) { PAGE_SIZE = 30; page = -1; all.length = 0; continue; }
-            throw e;
+            if (!tolerant) throw e;
+            misses++;
+            let nm = "?";
+            try {
+                const r2 = await api(listUrl(pointId, folderId, size, page, false));
+                nm = (r2.nomenclatures || []).map(x => x.name).join("; ");
+            } catch (_) { /* название узнать не удалось */ }
+            console.log(`ПРЕДУПРЕЖДЕНИЕ: раздел «${name}», позиция пропущена (Saby не отдаёт остаток): ${nm}`);
+            if (misses >= 5) throw e;
+            continue;
         }
         const arr = res.nomenclatures || [];
         all.push(...arr);
         if (!(res.outcome && res.outcome.hasMore) || arr.length === 0) break;
     }
     return all;
+}
+
+// все записи одного раздела: сначала обычный запрос, при ошибке Saby пробуем страницы поменьше
+async function fetchFolder(pointId, folderId, name) {
+    const key = folderId || 0;
+    const hint = folderSize.get(key);
+    const sizes = hint ? [hint] : [PAGE_SIZE, 10, 3, 1];
+    let lastErr;
+    for (const size of sizes) {
+        try {
+            const arr = await fetchPaged(pointId, folderId, size, size === 1, name);
+            if (!hint && size !== PAGE_SIZE) {
+                folderSize.set(key, size);
+                console.log(`Раздел «${name}»: помог размер страницы ${size}`);
+            }
+            return arr;
+        } catch (e) {
+            lastErr = e;
+            if (e.status && e.status < 500 && e.status !== 429) throw e;
+        }
+    }
+    throw lastErr;
 }
 
 async function pool(items, n, worker) {
@@ -159,7 +202,7 @@ async function main() {
         await pool(frontier, CONCURRENCY, async fid => {
             let arr;
             try {
-                arr = await fetchFolder(structStore.id, fid);
+                arr = await fetchFolder(structStore.id, fid, fid === null ? "корень" : nodes.get(fid).name);
             } catch (e) {
                 const nm = fid === null ? "корень" : nodes.get(fid).name;
                 walkFailures.push(nm);
@@ -206,7 +249,7 @@ async function main() {
         if (si === structIdx) continue;
         let failed = [];
         const load = async folder => {
-            const arr = await fetchFolder(stores[si].id, folder.hid);
+            const arr = await fetchFolder(stores[si].id, folder.hid, folder.name);
             for (const it of arr) {
                 if (!it.isParent) balances[si].set(it.id, Number(it.balance) || 0);
             }
