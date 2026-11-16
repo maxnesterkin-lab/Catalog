@@ -50,13 +50,82 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 <body>
 <div id="app"></div>
 <script>
-  let S = {step: "gate", tab: "catalog", store: null, cat: null, q: "", open: null};
-let STORES = [], CATS = {}, REAL = null, POOL = {}, UPDATED = "", DEMO = true, ADDR = {};
-fetch('data.json')
-  .then(response => response.json())
-  .then(data => {
-    window.CATS = data.categories;
-    render();
+/* ===== ДАННЫЕ: правьте только этот блок ===== */
+const STORES=["Баумана","ГУМ","Гаджиева","КТМ","Крупской","Книповича","Кольский","Ленина","Мир","ПЗ","Североморск"];
+const ADDR={
+"Баумана":"г. Мурманск, ул. Баумана, д. 3",
+"ГУМ":"г. Мурманск, пр-кт Героев-североморцев, д. 77",
+"Гаджиева":"г. Мурманск, ул. Магомета Гаджиева, д. 2/47",
+"КТМ":"г. Мурманск, ул. Карла Маркса, д. 29",
+"Крупской":"г. Мурманск, ул. Крупской, д. 38",
+"Книповича":"г. Мурманск, ул. Академика Книповича, д. 37",
+"Кольский":"г. Мурманск, Кольский пр-кт, д. 51, к. 8",
+"Ленина":"г. Мурманск, пр-кт Ленина, д. 19А",
+"Мир":"г. Мурманск, пр-кт Героев-североморцев, д. 33А",
+"ПЗ":"г. Мурманск, ул. Полярные Зори, д. 42",
+"Североморск":"г. Североморск, ул. Вице-адмирала Падорина, д. 21"
+};
+function sn(s){return s==="Североморск"?s:"SV "+s}
+/* товар: [название, описание, цена ₽, цвет] */
+const CATS={
+"Одноразовые сигареты":[
+["CAMOBAR MX 8000","Затяжек: 8000",790,"#9fd8ff"],
+["CRZ 10000","Затяжек: 10000",890,"#ffb36b"],
+["ELFBAR Cigalike 400","Затяжек: 400",290,"#d6d6d6"],
+["ELFBAR FS 18000","Затяжек: 18000",1090,"#ff8fb1"],
+["ELFBAR GH 23000","Затяжек: 23000",1190,"#b9a5ff"],
+["FALCON PRO 18000","Затяжек: 18000",1090,"#ffd23f"],
+["FUNKY LANDS Vi 10000","Затяжек: 10000",890,"#8be28b"],
+["GEEK BAR Pulse 12000","Затяжек: 12000",990,"#7fe3d6"],
+["HQD GLAZE 12000","Затяжек: 12000",950,"#f2a0ff"],
+["LOST MARY BM 16000","Затяжек: 16000",1050,"#ff7a59"],
+["OUKITEL CRYSTAL 8000","Затяжек: 8000",790,"#c9e6ff"]],
+"Ароматизаторы":[
+["FROST WIND 14 мл","Ароматизатор пищевой",450,"#8fd3ff"],
+["PDNKI 13 мл","Ароматизатор пищевой",450,"#ff9bd0"],
+["STEKLO 13,5 мл","Ароматизатор пищевой",450,"#b8f0d0"],
+["ПОДГОНКИ 13 мл","Ароматизатор пищевой",450,"#ffd78a"],
+["ANTAGONIST 13 мл","Ароматизатор пищевой",450,"#c4b5ff"],
+["LEGA 15 мл","Ароматизатор пищевой",480,"#ffb3a0"],
+["TRAVA 13 мл","Ароматизатор пищевой",450,"#a8e68f"],
+["HUSKY 14 мл","Ароматизатор пищевой",450,"#d0d0d0"]],
+"Картриджи":[
+["VAPORESSO XROS 2 мл, 0,6 Ом","Картридж Vaporesso",350,"#ffb347"],
+["VAPORESSO XROS 2 мл, 0,8 Ом","Картридж Vaporesso",350,"#ffb347"],
+["VAPORESSO XROS 2 мл, 1,0 Ом","Картридж Vaporesso",350,"#ffb347"],
+["VAPORESSO XROS 3 мл, 0,4 Ом","Картридж Vaporesso",380,"#ffb347"],
+["VAPORESSO LUXE Q MESH 3 мл, 0,6 Ом","Картридж Vaporesso",390,"#7aa7ff"],
+["VAPORESSO LUXE X MESH 5 мл, 0,4 Ом","Картридж Vaporesso",420,"#7aa7ff"],
+["VAPORESSO OSMALL 2 мл, 1,2 Ом","Картридж Vaporesso",340,"#e0e0e0"]]
+};
+/* вкусы по категориям (для картриджей вкусов нет) */
+const POOL={
+"Одноразовые сигареты":["Клубника-киви","Виноград","Манго","Кола","Мятная жвачка","Черника-малина","Арбуз","Персик-лёд"],
+"Ароматизаторы":["Клубника","Кола-вишня","Тропик","Энергетик","Ментол"],
+"Картриджи":null
+};
+/* true — у цен и наличия стоит пометка «пример». Когда внесёте настоящие цены, поставьте false */
+let DEMO=true;
+let REAL=null;
+let UPDATED="";
+/* ===== конец данных ===== */
+const S={step:"gate",store:null,cat:null,q:"",open:null,tab:"catalog"};
+const $=s=>document.getElementById(s);
+function has(si,pi,fi,ci){if(REAL){return REAL.st[Object.keys(CATS)[ci]][pi][fi].includes(si)}return (si*7+pi*13+fi*11+ci*5+3)%10>=4}
+function applyData(d){
+if(!d||!d.categories||!d.categories.length)return;
+STORES.length=0;d.stores.forEach(s=>STORES.push(s));
+Object.keys(CATS).forEach(k=>delete CATS[k]);
+REAL={fl:{},st:{}};
+d.categories.forEach(c=>{
+CATS[c.name]=c.items.map(it=>[it.name,it.meta||"",it.price,it.color||"#d0d0d0"]);
+REAL.fl[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.name):[""]);
+REAL.st[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.stores||[]):[it.stores||[]]);
+});
+DEMO=false;UPDATED=d.updated?new Date(d.updated).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"";S.store=null;S.cat=null;S.open=null;S.q="";
+if(S.step!=="gate")go("stores");
+}
+function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?sn(STORES[S.store]):""}</span></div>${title?`<h2>${title}</h2>`:""}`}
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
 function render(){
@@ -93,7 +162,7 @@ if(opened){body='<div class="detail">'+rows.map(({f,fi})=>{
 const here=has(S.store,i,fi,ci);
 const others=STORES.filter((s,si)=>si!==S.store&&has(si,i,fi,ci));
 return `<div class="fl"><div>${f?`<b>${f}</b>`:"Другие магазины"}<div class="meta">${others.length?"Есть ещё: "+others.join(", "):"В других магазинах нет"}</div></div><span class="av ${here?"ok":"no"}" style="margin:0;white-space:nowrap">${here?"Есть здесь":"Нет здесь"}</span></div>`}).join("")+"</div>"}
-html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]} ₽${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
+html.push(`<button class="card" onclick="S.open=S.open===${i}?null:${i};list()"><div class="prod"><div class="pic" style="background:${p[3]}">${p[0].split(" ")[0]}</div><div><h3>${p[0]}</h3><div class="meta">${p[1]}</div><div class="price">${p[2]?p[2]+" ₽":""}${DEMO?`<span class="tag">пример</span>`:""}</div><div class="av ${k}">${t}</div></div></div>${body}</button>`);
 });
 $("list").innerHTML=html.length?html.join(""):`<div class="empty">Ничего не найдено. Измените запрос.</div>`;
 }
