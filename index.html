@@ -56,19 +56,6 @@ fetch('data.json')
     window.CATS = data.categories;
     render();
   });
-if(!d||!d.categories||!d.categories.length)return;
-STORES.length=0;d.stores.forEach(s=>STORES.push(s));
-Object.keys(CATS).forEach(k=>delete CATS[k]);
-REAL={fl:{},st:{}};
-d.categories.forEach(c=>{
-CATS[c.name]=c.items.map(it=>[it.name,it.meta||"",it.price,it.color||"#d0d0d0"]);
-REAL.fl[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.name):[""]);
-REAL.st[c.name]=c.items.map(it=>it.flavors&&it.flavors.length?it.flavors.map(f=>f.stores||[]):[it.stores||[]]);
-});
-DEMO=false;UPDATED=d.updated?new Date(d.updated).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"";S.store=null;S.cat=null;S.open=null;S.q="";
-if(S.step!=="gate")go("stores");
-}
-function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">‹</button>`:""}<span class="badge">${S.store!==null&&S.step!=="stores"?sn(STORES[S.store]):""}</span></div>${title?`<h2>${title}</h2>`:""}`}
 function go(step){S.step=step;S.open=null;if(step==="cats")S.q="";render();window.scrollTo(0,0)}
 function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
 function render(){
