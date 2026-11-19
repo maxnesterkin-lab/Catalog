@@ -1,369 +1,151 @@
-// Обновление data.json из Saby Retail.
-// 1) обходит весь каталог (разделы -> бренды -> вкусы) по магазину SV Баумана,
-// 2) для остальных магазинов запрашивает только остатки,
-// 3) записывает data.json (если данные изменились).
-// Ключи берутся из секретов GitHub и в журнал не попадают.
-
-const fs = require('fs');
-
-const APP_ID = process.env.SABY_APP_ID;
-const APP_SECRET = process.env.SABY_APP_SECRET;
-const SECRET_KEY = process.env.SABY_SECRET_KEY;
-
-const BASE = "https://api.sbis.ru/retail";
-const STRUCTURE_STORE = "Баумана";                       // по нему читаем структуру каталога и цены
-const STORE_ORDER = ["Баумана", "ГУМ", "Гаджиева", "КТМ", "Крупской", "Книповича", "Кольский", "Ленина", "Мир", "ПЗ", "Североморск"];
-const EXCLUDE_ROOTS = ["вывод из ассортимента"];         // служебные разделы, которые не показываем
-const CONCURRENCY = 2;                                   // меньше параллельных запросов, чтобы Saby не перегружать
-const PAUSE_MS = 150;                                    // пауза после каждого запроса
-let lastError = "";
-const PAGE_SIZE = 30;
-const folderSize = new Map();                            // разделам, которые не читаются обычным запросом, запоминаем рабочий размер страницы
-let requests = 0;
-let headers = {};
-
-function fail(msg) {
-    console.error("ОШИБКА: " + msg);
-    process.exit(1);
+// Saby catalog synchronization. Candidate version: test without publishing first.
+'use strict';
+const fs = require('node:fs');
+const BASE = 'https://api.sbis.ru/retail/';
+const STORE_ORDER = ['Баумана','ГУМ','Гаджиева','КТМ','Крупской','Книповича','Кольский','Ленина','Мир','ПЗ','Североморск'];
+const EXCLUDE_ROOTS = ['вывод из ассортимента'];
+const COLORS = ['#9fd8ff','#ffb36b','#ff8fb1','#b9a5ff','#ffd23f','#8be28b','#7fe3d6','#f2a0ff','#ff7a59','#c9e6ff'];
+const sort = new Intl.Collator('ru');
+const byName = (a,b) => sort.compare(a.name,b.name) || String(a.id ?? a.hid).localeCompare(String(b.id ?? b.hid));
+const normalize = x => String(x ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const numeric = v => (v == null || String(v).trim()==='' || typeof v==='boolean' || !Number.isFinite(Number(v))) ? null : Number(v);
+const key = v => {if (v==null || String(v).trim()==='') throw Error('Missing Saby ID'); return String(v);};
+const colorFor = name => {let h=0; for(const c of name) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length];};
+function clean(name, folder) {const f=name.trim(); if(f.toLowerCase().startsWith(folder.toLowerCase())) return f.slice(folder.length).replace(/^[\s\-–—:,/]+/,'').trim()||f; return f;}
+function rows(d, field) {
+const v=d?.[field];
+if(Array.isArray(v)) return v;
+if(v && typeof v==='object') {
+if('id' in v || 'name' in v) return [v];
+const a=Object.values(v); if(a.every(r=>r && typeof r==='object' && !Array.isArray(r))) return a;
 }
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function login() {
-    const res = await fetch("https://online.sbis.ru/oauth/service/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ app_client_id: APP_ID, app_secret: APP_SECRET, secret_key: SECRET_KEY })
-    });
-    if (!res.ok) fail(`вход в Saby не удался (HTTP ${res.status})`);
-    const data = await res.json();
-    const token = data.token || data.access_token;
-    if (!token) fail("в ответе на вход нет токена");
-    headers = { "X-SBISAccessToken": token };
-    return true;
+throw Error('Unexpected API field: '+field);
 }
-
-// запрос с повторами при перегрузке и повторным входом, если токен истёк
-async function api(url) {
-    let relogged = false;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-        let res;
-        requests++;
-        try {
-            res = await fetch(url, { headers });
-        } catch (e) {
-            lastError = "сеть: " + ((e.cause && e.cause.code) || e.message);
-            if (attempt < 5) {
-                await sleep(1500 * attempt);
-                continue;
-            }
-            throw new Error(lastError);
-        }
-
-        if (res.status === 401 && !relogged) {
-            await login();
-            relogged = true;
-            attempt--;                       // повторный вход не считаем попыткой
-            continue;
-        }
-        if (res.status === 429) {
-            lastError = "HTTP 429 слишком частые запросы";
-            const retryAfter = Number(res.headers.get("retry-after")) || 0;
-            await sleep(Math.max(retryAfter * 1000, 2000 * attempt));
-            continue;
-        }
-
-        const text = await res.text();
-        if (res.status >= 500) {
-            lastError = `HTTP ${res.status} ${text.slice(0, 200)}`;
-            if (attempt < 5) {
-                await sleep(1000 * attempt);
-                continue;
-            }
-            // статус сохраняем: fetchFolder по нему попробует страницы поменьше
-            const err = new Error(lastError);
-            err.status = res.status;
-            throw err;
-        }
-        if (!res.ok) {
-            const err = new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-            err.status = res.status;
-            throw err;
-        }
-        return JSON.parse(text);
-    }
-    throw new Error(lastError || "запрос не удался");
+function client(env, fetcher=fetch, pause=sleep) {
+let token, requests=0;
+async function login(){
+if(!env.SABY_APP_ID||!env.SABY_APP_SECRET||!env.SABY_SECRET_KEY) throw Error('Missing GitHub secrets');
+const r=await fetcher('https://online.sbis.ru/oauth/service/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_client_id:env.SABY_APP_ID,app_secret:env.SABY_APP_SECRET,secret_key:env.SABY_SECRET_KEY}),redirect:'error',signal:AbortSignal.timeout(20000)});
+if(!r.ok) throw Error('Authorization HTTP '+r.status);
+const d=await r.json(); token=d.token||d.access_token; if(typeof token!=='string'||!token) throw Error('Missing access token');
 }
-
-// Saby иногда отдаёт nomenclatures не массивом (например, одиночным объектом) -- приводим к массиву
-let shapeLogged = false;
-function toArray(v) {
-    if (Array.isArray(v)) return v;
-    if (v === null || v === undefined || v === "") return [];
-    if (!shapeLogged) {
-        shapeLogged = true;
-        console.log("ПРЕДУПРЕЖДЕНИЕ: nomenclatures пришло не массивом, тип: " + typeof v + ", пример: " + JSON.stringify(v).slice(0, 200));
-    }
-    if (typeof v === "object") return ("id" in v || "name" in v) ? [v] : Object.values(v).filter(x => x && typeof x === "object");
-    return [];
+async function get(path, params){
+const u=new URL(path,BASE); for(const [k,v] of Object.entries(params)) if(v!=null) u.searchParams.set(k,String(v));
+let relogged=false;
+for(let a=1;a<=4;a++){
+if(++requests>12000) throw Error('Request budget exceeded');
+await pause(150);
+let r;
+try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===4) throw Error('Network/timeout'); await pause(1000*a);continue;}
+if(r.ok) return r.json();
+if(r.status===401&&!relogged){await login();relogged=true;a--;continue;}
+if((r.status===429||r.status>=500)&&a<4){const raw=r.headers.get('retry-after');const seconds=Number(raw);if(seconds>60) throw Error('Retry-after exceeds limit');await pause(Math.max(a*1000,Number.isFinite(seconds)?seconds*1000:0));continue;}
+const e=Error('HTTP '+r.status);e.status=r.status;throw e;
 }
-
-function listUrl(pointId, folderId, size, page, withBalance = true) {
-    return `${BASE}/v2/nomenclature/list?pointId=${pointId}&withBalance=${withBalance}&pageSize=${size}&page=${page}` +
-        (folderId ? `&folder=${folderId}` : "");
+throw Error('API retry limit');
 }
-
-// чтение раздела постранично; при tolerant=true позиции, на которых Saby падает, пропускаются
-async function fetchPaged(pointId, folderId, size, tolerant, name) {
-    const all = [];
-    let misses = 0;
-    for (let page = 0; page < 3000; page++) {
-        let res;
-        try {
-            res = await api(listUrl(pointId, folderId, size, page));
-            misses = 0;
-        } catch (e) {
-            if (!tolerant) throw e;
-            misses++;
-            let nm = "?";
-            try {
-                const r2 = await api(listUrl(pointId, folderId, size, page, false));
-                nm = toArray(r2.nomenclatures).map(x => x.name).join("; ");
-            } catch (_) { /* название узнать не удалось */ }
-            console.log(`ПРЕДУПРЕЖДЕНИЕ: раздел «${name}», позиция пропущена (Saby не отдаёт остаток): ${nm}`);
-            if (misses >= 5) throw e;
-            continue;
-        }
-        const arr = toArray(res.nomenclatures);
-        for (const x of arr) all.push(x);
-        if (!(res.outcome && res.outcome.hasMore) || arr.length === 0) break;
-    }
-    return all;
+return {login,get,count:()=>requests};
 }
-
-// все записи одного раздела: сначала обычный запрос, при ошибке Saby пробуем страницы поменьше
-async function fetchFolder(pointId, folderId, name) {
-    const key = folderId || 0;
-    const hint = folderSize.get(key);
-    const sizes = hint ? [hint] : [PAGE_SIZE, 10, 3, 1];
-    let lastErr;
-    for (const size of sizes) {
-        try {
-            const arr = await fetchPaged(pointId, folderId, size, size === 1, name);
-            if (!hint && size !== PAGE_SIZE) {
-                folderSize.set(key, size);
-                console.log(`Раздел «${name}»: помог размер страницы ${size}`);
-            }
-            return arr;
-        } catch (e) {
-            lastErr = e;
-            if (e.status && e.status < 500 && e.status !== 429) throw e;
-        }
-    }
-    throw lastErr;
+async function paged(api,params,size){
+const all=[];const seen=new Set();
+for(let page=0;page<3000;page++){
+const d=await api.get('v2/nomenclature/list',{...params,pageSize:size,page});
+const part=rows(d,'nomenclatures');
+for(const x of part){const k=(x.isParent?'F:':'P:')+key(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k)) throw Error('Duplicate row during pagination');seen.add(k);all.push(x);}
+if(d?.outcome?.hasMore===false) return all;
+if(d?.outcome?.hasMore!==true||!part.length) throw Error('Uncertain pagination');
 }
-
-async function pool(items, n, worker) {
-    let i = 0;
-    await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-        while (i < items.length) {
-            const item = items[i++];
-            await worker(item);
-            await sleep(PAUSE_MS);
-        }
-    }));
+throw Error('Page budget exceeded');
 }
-
-const collator = new Intl.Collator("ru");
-const byName = (a, b) => collator.compare(a.name || "", b.name || "");
-const normStore = name => String(name || "").replace(/^(SV|SI)\s+/i, "").trim().toLowerCase();
-
-const COLORS = ["#9fd8ff", "#ffb36b", "#ff8fb1", "#b9a5ff", "#ffd23f", "#8be28b", "#7fe3d6", "#f2a0ff", "#ff7a59", "#c9e6ff"];
-function colorFor(name) {
-    let h = 0;
-    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return COLORS[h % COLORS.length];
+async function folder(api, params){
+let err;
+for(const size of [100,30,10,3,1]){
+try{return await paged(api,params,size);}catch(e){err=e;if(!(e.status>=500))throw e;}
 }
-
-// убираем название бренда из начала названия вкуса
-function cleanFlavor(flavor, folderName) {
-    const f = flavor.trim();
-    if (f.toLowerCase().startsWith(folderName.toLowerCase())) {
-        const rest = f.slice(folderName.length).replace(/^[\s\-–—:,/]+/, "").trim();
-        if (rest) return rest;
-    }
-    return f;
+throw err;
 }
-
-async function main() {
-    if (!APP_ID || !APP_SECRET || !SECRET_KEY) {
-        fail("не заданы секреты SABY_APP_ID, SABY_APP_SECRET, SABY_SECRET_KEY");
-    }
-    const started = Date.now();
-    await login();
-    console.log("Вход выполнен.");
-
-    // 1. Точки продаж -> нужные магазины
-    const pointsResp = await api(`${BASE}/point/list?product=retail&pageSize=100`);
-    const points = pointsResp.salesPoints || [];
-    const stores = [];
-    for (const name of STORE_ORDER) {
-        const p = points.find(x => normStore(x.name) === name.toLowerCase());
-        if (p) stores.push({ name, id: p.id });
-        else console.log(`ПРЕДУПРЕЖДЕНИЕ: точка «${name}» не найдена в Saby, пропускаю`);
-    }
-    if (!stores.length) fail("ни одна нужная точка не найдена");
-    console.log(`Магазинов: ${stores.length}`);
-
-    const structStore = stores.find(s => s.name === STRUCTURE_STORE) || stores[0];
-
-    // 2. Обход каталога по структурному магазину
-    const nodes = new Map();      // hierarchicalId -> {hid,name,leaves,children}
-    const roots = [];
-    const balances = stores.map(() => new Map());   // индекс магазина -> (id товара -> остаток)
-    const structIdx = stores.indexOf(structStore);
-    const walkFailures = [];
-    let frontier = [null];
-    let level = 0;
-    while (frontier.length) {
-        const next = [];
-        await pool(frontier, CONCURRENCY, async fid => {
-            let arr;
-            try {
-                arr = await fetchFolder(structStore.id, fid, fid === null ? "корень" : nodes.get(fid).name);
-            } catch (e) {
-                const nm = fid === null ? "корень" : nodes.get(fid).name;
-                walkFailures.push(nm);
-                console.log(`ПРЕДУПРЕЖДЕНИЕ: не удалось прочитать раздел «${nm}»: ${e.message}`);
-                return;
-            }
-            for (const it of arr) {
-                if (it.isParent) {
-                    const hid = it.hierarchicalId != null ? it.hierarchicalId : it.id;
-                    const node = { hid, name: it.name || "", leaves: [], children: [] };
-                    nodes.set(hid, node);
-                    if (fid === null) roots.push(node); else nodes.get(fid).children.push(node);
-                    next.push(hid);
-                } else if (fid !== null) {
-                    const bal = Number(it.balance) || 0;
-                    nodes.get(fid).leaves.push({ id: it.id, name: it.name || "", cost: Number(it.cost) || 0 });
-                    balances[structIdx].set(it.id, bal);
-                }
-            }
-        });
-        level++;
-        console.log(`Уровень ${level}: разделов найдено ${next.length}`);
-        frontier = next;
-    }
-
-    if (walkFailures.length > Math.max(3, nodes.size * 0.05)) {
-        fail(`слишком много разделов не прочитано (${walkFailures.length}), data.json не изменён`);
-    }
-    const rootsUsed = roots.filter(r => !EXCLUDE_ROOTS.includes(r.name.trim().toLowerCase()));
-    console.log(`Корневых разделов: ${roots.length}, показываем: ${rootsUsed.length}`);
-
-    // папки, внутри которых лежат товары (вкусы)
-    const leafFolders = [];
-    (function collect(list) {
-        for (const n of list) {
-            if (n.leaves.length) leafFolders.push(n);
-            collect(n.children);
-        }
-    })(rootsUsed);
-    console.log(`Папок с товарами: ${leafFolders.length}`);
-
-    // 3. Остатки по остальным магазинам
-    const MAX_STALE_SHARE = 0.05;                    // сколько разделов магазина можно не прочитать (доля)
-    const stale = stores.map(() => new Set());       // индекс магазина -> разделы, чьи остатки взяты из прошлого data.json
-    for (let si = 0; si < stores.length; si++) {
-        if (si === structIdx) continue;
-        let failed = [];
-        const load = async folder => {
-            const arr = await fetchFolder(stores[si].id, folder.hid, folder.name);
-            for (const it of arr) {
-                if (!it.isParent) balances[si].set(it.id, Number(it.balance) || 0);
-            }
-        };
-        await pool(leafFolders, CONCURRENCY, async folder => {
-            try { await load(folder); } catch (e) { failed.push(folder); }
-        });
-        if (failed.length) {
-            console.log(`Остатки ${stores[si].name}: повтор для ${failed.length} разделов`);
-            await sleep(5000);
-            const still = [];
-            for (const folder of failed) {
-                try { await load(folder); } catch (e) { still.push({ folder, msg: folder.name + ": " + e.message }); }
-                await sleep(PAUSE_MS);
-            }
-            if (still.length > Math.max(5, Math.ceil(leafFolders.length * MAX_STALE_SHARE))) {
-                fail(`остатки ${stores[si].name} получены не полностью (${still.length} разделов), data.json не изменён. Пример: ${still[0].msg}`);
-            }
-            for (const x of still) {
-                stale[si].add(x.folder.hid);
-                console.log(`ПРЕДУПРЕЖДЕНИЕ: ${stores[si].name}, раздел «${x.folder.name}» не прочитан, остатки взяты из прошлого data.json`);
-            }
-        }
-        console.log(`Остатки: ${stores[si].name} готово`);
-    }
-
-    // 4. Сборка data.json
-    // прошлые остатки: «раздел|вкус» -> множество названий магазинов (для разделов, которые Saby не отдал)
-    const prevStock = new Map();
-    try {
-        const prev = JSON.parse(fs.readFileSync("data.json", "utf-8"));
-        const prevNames = (prev.stores || []).map(x => typeof x === "string" ? x : x.name);
-        if (Array.isArray(prev.categories)) {
-            for (const c of prev.categories) for (const it of (c.items || [])) for (const f of (it.flavors || [])) {
-                prevStock.set(it.name + "|" + f.name, new Set((f.stores || []).map(i => prevNames[i])));
-            }
-        }
-    } catch (e) { /* прошлых данных нет */ }
-    const categories = [];
-    let totalFlavors = 0;
-    for (const root of rootsUsed.slice().sort(byName)) {
-        const items = [];
-        (function collect(node) {
-            if (node.leaves.length) {
-                const leaves = node.leaves.slice().sort(byName);
-                const costs = leaves.map(l => l.cost).filter(c => c > 0);
-                items.push({
-                    name: node.name,
-                    meta: "",
-                    price: costs.length ? Math.min(...costs) : 0,
-                    color: colorFor(node.name),
-                    flavors: leaves.map(l => ({
-                        name: cleanFlavor(l.name, node.name),
-                        stores: stores.map((s, si) => {
-                            if (stale[si].has(node.hid)) {
-                                const ps = prevStock.get(node.name + "|" + cleanFlavor(l.name, node.name));
-                                return ps && ps.has(s.name) ? si : -1;
-                            }
-                            return (balances[si].get(l.id) || 0) > 0 ? si : -1;
-                        }).filter(x => x >= 0)
-                    }))
-                });
-                totalFlavors += leaves.length;
-            }
-            node.children.slice().sort(byName).forEach(collect);
-        })(root);
-        if (items.length) categories.push({ name: root.name, items });
-    }
-    if (!totalFlavors) fail("товары не найдены, data.json не изменён");
-
-    const content = { stores: stores.map(s => s.name), categories };
-
-    // пишем файл только если данные изменились
-    let old = null;
-    try {
-        const prev = JSON.parse(fs.readFileSync("data.json", "utf-8"));
-        old = JSON.stringify({ stores: prev.stores, categories: prev.categories });
-    } catch (e) { /* файла нет или он пустой */ }
-    if (old === JSON.stringify(content)) {
-        console.log("Данные не изменились, data.json не трогаю.");
-    } else {
-        fs.writeFileSync("data.json", JSON.stringify({ updated: new Date().toISOString(), ...content }), "utf-8");
-        console.log("data.json обновлён.");
-    }
-    console.log(`Категорий: ${categories.length}, позиций (вкусов): ${totalFlavors}, запросов к Saby: ${requests}, время: ${Math.round((Date.now() - started) / 1000)} с`);
+async function sync(api,prev,log=console.log){
+await api.login();
+const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
+const stores=STORE_ORDER.map(name=>{
+const target=normalize(name);const matches=points.filter(p=>normalize(p.name)===target||(target==='гаджиева'&&normalize(p.name)==='гаджиево'));
+if(matches.length!==1) throw Error('Sales point not unique: '+name);
+return {name,id:key(matches[0].id)};
+});
+if(new Set(stores.map(s=>s.id)).size!==stores.length) throw Error('Duplicate sales point ID');
+const nodes=new Set(),ids=new Set();
+async function walk(parent=null,depth=0){
+if(depth>12) throw Error('Catalog nesting limit');
+const arr=await folder(api,{folder:parent,withBalance:false});
+const children=[],leaves=[];
+for(const x of arr){
+const name=String(x.name??'').trim(); if(!name) throw Error('Unnamed catalog row');
+if(x.isParent){
+if(parent===null&&EXCLUDE_ROOTS.includes(normalize(name)))continue;
+const hid=key(x.hierarchicalId??x.id);if(nodes.has(hid))throw Error('Duplicate catalog folder');nodes.add(hid);
+const sub=await walk(hid,depth+1);children.push({name,hid,...sub});
+} else {
+if(parent===null)throw Error('Root-level product requires catalog mapping');
+const id=key(x.id);if(ids.has(id))throw Error('Duplicate catalog product ID');ids.add(id);
+leaves.push({id,name,cost:numeric(x.cost),stock:Array(stores.length).fill(null),pointCosts:Array(stores.length).fill(null)});
 }
-
-main().catch(e => fail(String(e && e.message || e)));
+}
+return {children,leaves};
+}
+const roots=(await walk()).children;
+let leafFolders=[];
+function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gather);}
+roots.forEach(gather);
+if(!ids.size)throw Error('Empty global catalog');
+log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
+// We deliberately never treat missing rows as confirmed zero stock.
+// If the API omits a row, retain the published file unchanged and report how many are unknown.
+let unknown=0;
+for(let si=0;si<stores.length;si++){
+const store=stores[si];let missing=0,positive=0;
+for(const n of leafFolders){
+const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});
+const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
+for(const leaf of n.leaves){
+const r=mapped.get(leaf.id);
+const b=numeric(r?.balance);
+leaf.stock[si]=b;leaf.pointCosts[si]=numeric(r?.cost);
+if(b===null)missing++; else if(b>0)positive++;
+}
+}
+unknown+=missing;log(`Stock ${store.name}: positive=${positive}; unknown=${missing}; requests=${api.count()}`);
+}
+if(unknown)throw Error(`Unknown balances: ${unknown}. data.json unchanged; verify API omission semantics.`);
+const categories=[];let total=0;
+for(const root of roots.slice().sort(byName)){
+const items=[];
+function collect(n){
+if(n.leaves.length){
+const leaves=n.leaves.slice().sort(byName);
+const prices=leaves.map(l=>{const preferred=l.pointCosts[0];if(preferred>0)return preferred;if(l.cost>0)return l.cost;const candidates=l.pointCosts.filter(c=>c>0);return candidates.length?Math.min(...candidates):null;});
+if(prices.some(p=>p===null))throw Error('Missing valid prices in '+n.name);
+const flavors=leaves.map(l=>({name:clean(l.name,n.name),stores:l.stock.flatMap((v,i)=>v>0?[i]:[])}));
+items.push({name:n.name,meta:'',price:Math.min(...prices),color:colorFor(n.name),flavors});total+=flavors.length;
+}
+n.children.slice().sort(byName).forEach(collect);
+}
+collect(root);if(items.length)categories.push({name:root.name,items});
+}
+const oldCount=prev.categories.reduce((a,c)=>a+c.items.reduce((b,it)=>b+it.flavors.length,0),0);
+if(total<oldCount)throw Error(`Catalog shrank from ${oldCount} to ${total}; manual review required`);
+const newCats=new Set(categories.map(c=>normalize(c.name)));
+if(prev.categories.some(c=>!EXCLUDE_ROOTS.includes(normalize(c.name))&&!newCats.has(normalize(c.name))))throw Error('Previously published category missing; manual review required');
+log(`Result: ${categories.length} categories; ${total} positions; old positions=${oldCount}; requests=${api.count()}`);
+return {stores:stores.map(s=>s.name),categories};
+}
+async function main(){
+const started=Date.now();const prev=JSON.parse(fs.readFileSync('data.json','utf8'));
+if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores))throw Error('Unexpected current data.json format');
+const api=client(process.env);const content=await sync(api,prev);
+if(JSON.stringify(content)===JSON.stringify({stores:prev.stores,categories:prev.categories}))console.log('No changes.');
+else {const tmp='data.json.saby.tmp';fs.writeFileSync(tmp,JSON.stringify({updated:new Date().toISOString(),...content}));fs.renameSync(tmp,'data.json');console.log('Candidate data.json generated locally.');}
+console.log(`Completed in ${Math.round((Date.now()-started)/1000)} s; requests=${api.count()}`);
+}
+if(require.main===module)main().catch(e=>{console.error('Sync stopped: '+e.message);process.exitCode=1;});
+module.exports={sync,client,paged,STORE_ORDER};
