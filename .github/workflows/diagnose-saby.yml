@@ -85,4 +85,10 @@ jobs:
             const items = rows(global, ['nomenclatures']);
             if (items) console.log(`Global catalog first page: ${items.length}; folders: ${items.filter(x => x.isParent).length}; more: ${global?.outcome?.hasMore === true}`);
             else if (global) console.log('Catalog: unrecognized response fields: ' + safeKeys(global));
-            console.log(`Diagnostics finished; 
+            console.log('Diagnostics finished');
+          }
+          main().catch(() => {
+            console.error('Diagnostics failed');
+            process.exitCode = 1;
+          });
+          JS
