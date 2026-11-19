@@ -1,0 +1,97 @@
+name: Update Saby Retail Data
+
+# Temporary maintenance mode: scheduled runs are disabled until validation.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish data.json to main (leave unchecked for preview)'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: saby-catalog-update-main
+  cancel-in-progress: false
+
+jobs:
+  update-data:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run script to fetch data from Saby
+        env:
+          SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
+          SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
+          SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
+          node update-script.js
+          node - <<'JS'
+          const fs = require('node:fs');
+          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+          if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
+            throw new Error('Unexpected catalog structure; publication blocked');
+          }
+          let count = 0;
+          for (const c of d.categories) {
+            if (!Array.isArray(c.items)) throw new Error('Invalid items');
+            for (const p of c.items) {
+              if (!Array.isArray(p.flavors)) throw new Error('Invalid positions');
+              for (const f of p.flavors) {
+                if (!Array.isArray(f.stores) || f.stores.some(i => !Number.isInteger(i) || i < 0 || i >= d.stores.length)) throw new Error('Invalid store index');
+                count++;
+              }
+            }
+          }
+          if (!count) throw new Error('Empty catalog');
+          console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
+          JS
+
+      - name: Preview only - nothing published
+        if: ${{ !inputs.publish }}
+        run: echo 'Preview completed. data.json was not committed or pushed.'
+
+      - name: Commit and push if data changed
+        if: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(cat "$RUNNER_TEMP/saby-base-sha")
+          if git diff --quiet HEAD -- data.json; then
+            echo 'No changes to data.json.'
+            exit 0
+          fi
+          cp data.json "$RUNNER_TEMP/saby-data-candidate.json"
+          git restore --source=HEAD --staged --worktree -- data.json
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$base" origin/main; then
+            echo 'Main history changed during update. Publication blocked.'
+            exit 1
+          fi
+          if ! git diff --quiet "$base" origin/main -- data.json update-script.js .github/workflows/update-prices.yml; then
+            echo 'Data or update code changed during update. Publication blocked.'
+            exit 1
+          fi
+          git switch --detach origin/main
+          cp "$RUNNER_TEMP/saby-data-candidate.json" data.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- data.json
+          git commit -m 'Auto-update prices and stock from Saby API'
+          git push origin HEAD:refs/heads/main
