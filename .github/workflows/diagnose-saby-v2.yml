@@ -1,0 +1,129 @@
+name: Diagnose Saby API
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Read-only catalog diagnostics v2
+        env:
+          SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
+          SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
+          SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
+        run: |
+          node <<'JS'
+          const base = 'https://api.sbis.ru/retail/';
+          const env = process.env;
+          const norm = s => String(s ?? '').trim().toLowerCase().replace(/ё/g,'е');
+          const excluded = new Set(['вывод из ассортимента','служебный раздел','новые товары','маркированная продукция']);
+          const sample = 'brusko noir 25000';
+          const sleep = ms => new Promise(r => setTimeout(r,ms));
+          let token, calls = 0;
+          function list(data, key) {
+            const v = data?.[key];
+            if (Array.isArray(v)) return v;
+            if (v && typeof v === 'object') {
+              if ('id' in v || 'name' in v) return [v];
+              const a = Object.values(v);
+              if (a.every(x => x && typeof x === 'object' && !Array.isArray(x))) return a;
+            }
+            throw Error('unexpected response: ' + key);
+          }
+          async function get(path, params) {
+            for (let attempt=0; attempt<3; attempt++) {
+              if (++calls > 500) throw Error('request limit reached');
+              const u = new URL(path,base);
+              for (const [k,v] of Object.entries(params)) if (v != null) u.searchParams.set(k,String(v));
+              await sleep(200);
+              let r;
+              try { r = await fetch(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(12000)}); }
+              catch { if(attempt===2) throw Error('network error'); await sleep(1000); continue; }
+              if (r.ok) return await r.json();
+              if (r.status===429 || r.status>=500) { if(attempt===2) throw Error('HTTP '+r.status); await sleep(1500*(attempt+1)); continue; }
+              throw Error('HTTP '+r.status);
+            }
+          }
+          async function folder(id, pointId, withBalance) {
+            const out = [];
+            for(let page=0;page<100;page++) {
+              const d = await get('v2/nomenclature/list',{folder:id,pointId,withBalance,pageSize:25,page});
+              const a = list(d,'nomenclatures');
+              out.push(...a);
+              if (d?.outcome?.hasMore === false) return out;
+              if (d?.outcome?.hasMore !== true) throw Error('missing pagination flag');
+              if (!a.length) throw Error('empty page with hasMore=true');
+            }
+            throw Error('page limit reached');
+          }
+          const leaf = a => a.filter(x=>!x.isParent);
+          const ids = a => new Set(a.filter(x=>x.id!=null).map(x=>String(x.id)));
+          async function main() {
+            if (!env.SABY_APP_ID || !env.SABY_APP_SECRET || !env.SABY_SECRET_KEY) throw Error('missing secrets');
+            const r = await fetch('https://online.sbis.ru/oauth/service/',{method:'POST',headers:{'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(15000),body:JSON.stringify({app_client_id:env.SABY_APP_ID,app_secret:env.SABY_APP_SECRET,secret_key:env.SABY_SECRET_KEY})});
+            console.log('Authorization: HTTP '+r.status);
+            if (!r.ok) throw Error('authorization failed');
+            const auth = await r.json();
+            token = auth.token || auth.access_token;
+            if (typeof token!=='string' || !token) throw Error('no token');
+            console.log('::add-mask::'+token.replace(/[\r\n]/g,''));
+            const points = list(await get('point/list',{product:'retail',pageSize:100,page:0}),'salesPoints');
+            console.log('Sales points: '+points.length);
+            const roots = await folder(null,null,false);
+            const queue = [], seen = new Set(), samples = [];
+            const all = new Set();
+            let groups=0, errors=0, noId=0, excludedCount=0, leaves=0;
+            function collect(a) {
+              for (const x of a) {
+                if (x.isParent) {
+                  if (excluded.has(norm(x.name))) { excludedCount++; continue; }
+                  const id = x.hierarchicalId ?? x.id;
+                  if (id==null) {errors++; continue;}
+                  const key=String(id);
+                  if (seen.has(key)) continue;
+                  seen.add(key);
+                  if (norm(x.name)===sample) samples.push(id);
+                  queue.push(id);
+                } else {
+                  leaves++;
+                  if(x.id==null) noId++; else all.add(String(x.id));
+                }
+              }
+            }
+            collect(roots);
+            for(let i=0;i<queue.length && i<350;i++) {
+              try {const a=await folder(queue[i],null,false); groups++; collect(a);}
+              catch(e) {errors++; console.log('Global folder read failed: '+e.message); if(calls>=500) break;}
+              if ((i+1)%50===0) console.log('Global folders checked: '+(i+1));
+            }
+            const complete = errors===0 && noId===0 && groups===queue.length;
+            console.log(`GLOBAL: folders=${groups}/${queue.length}; leaves=${leaves}; unique IDs=${all.size}; excluded folders=${excludedCount}; errors=${errors}; missing IDs=${noId}; complete=${complete}`);
+            console.log('Control group matches: '+samples.length);
+            for (const [i,id] of samples.entries()) {
+              let global;
+              try { global=ids(leaf(await folder(id,null,false))); console.log(`Control ${i+1}: global unique IDs=${global.size}`); }
+              catch(e) { console.log('Control global error: '+e.message); continue; }
+              for (const name of ['Баумана','Гаджиева']) {
+                const p=points.find(x=>norm(x.name).replace(/^(sv|si)\s+/,'')===norm(name));
+                if (!p || p.id==null) {console.log(name+': point not found'); continue;}
+                for (const balance of [false,true]) {
+                  try {
+                    const a=leaf(await folder(id,p.id,balance)), set=ids(a);
+                    const matched=[...set].filter(x=>global.has(x)).length;
+                    const known=a.filter(x=>x.balance!=null && String(x.balance).trim()!=='' && Number.isFinite(Number(x.balance)));
+                    console.log(`${name}; withBalance=${balance}; unique IDs=${set.size}; matched global=${matched}; ${balance?'positive='+known.filter(x=>Number(x.balance)>0).length+'; unknown balance='+ (a.length-known.length):'balance not requested'}`);
+                  } catch(e) {console.log(`${name}; withBalance=${balance}; ERROR: ${e.message}`);}
+                }
+              }
+            }
+            console.log('Diagnostics finished; API requests: '+calls);
+            if (!complete) console.log('WARNING: global counts are partial, do not publish them.');
+          }
+          main().catch(e=>{ console.error('Diagnostics failed: '+e.message); process.exitCode=1; });
+          JS
