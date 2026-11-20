@@ -41,7 +41,7 @@ try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',sig
 if(r.ok) return r.json();
 if(r.status===401&&!relogged){await login();relogged=true;a--;continue;}
 if((r.status===429||r.status>=500)&&a<4){const raw=r.headers.get('retry-after');const seconds=Number(raw);if(seconds>60) throw Error('Retry-after exceeds limit');await pause(Math.max(a*1000,Number.isFinite(seconds)?seconds*1000:0));continue;}
-const e=Error('HTTP '+r.status);e.status=r.status;throw e;
+const e=Error('HTTP '+r.status+' at '+path+' page='+params.page+' pageSize='+params.pageSize+' scope='+(params.folder==null?'root':'folder'));e.status=r.status;throw e;
 }
 throw Error('API retry limit');
 }
