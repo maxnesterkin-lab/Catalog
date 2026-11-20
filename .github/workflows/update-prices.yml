@@ -1,51 +1,69 @@
-name: Saby API diagnostic
+name: Saby full catalog preview
+
+# Temporary maintenance mode: scheduled runs are disabled until validation.
 on:
   workflow_dispatch:
     inputs:
       publish:
+        description: 'Publish data.json to main (leave unchecked for preview)'
         type: boolean
+        required: true
         default: false
+
 permissions:
   contents: read
+
+concurrency:
+  group: saby-catalog-test
+  cancel-in-progress: false
+
 jobs:
-  diagnostic:
+  update-data:
+    if: github.ref == 'refs/heads/saby-test-20261120-105612'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test Saby API
+
+      - name: Run script to fetch data from Saby
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
+          set -euo pipefail
+          git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
+          node update-script.js
           node - <<'JS'
-          const {client} = require('./update-script.js');
-          (async () => {
-            const api = client(process.env);
-            await api.login();
-            const tests = [
-              ['Folder cursor', {folder:11164,order:'after'}],
-              ['Global cursor', {position:11164,order:'after'}],
-              ['Name search', {searchString:'OGGO',page:0}]
-            ];
-            for (const [name,params] of tests) {
-              try {
-                const d = await api.get('v2/nomenclature/list',
-                  {...params,pageSize:25,withBalance:false});
-                const rows = Array.isArray(d.nomenclatures)
-                  ? d.nomenclatures
-                  : Object.values(d.nomenclatures || {});
-                const matched = rows.filter(x =>
-                  String(x.hierarchicalParent)==='11164');
-                console.log(name,'OK','rows='+rows.length,
-                  'folderMatches='+matched.length);
-              } catch(e) {
-                console.log(name,'FAILED',e.status || e.name);
+          const fs = require('node:fs');
+          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+          if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
+            throw new Error('Unexpected catalog structure; publication blocked');
+          }
+          let count = 0;
+          for (const c of d.categories) {
+            if (!Array.isArray(c.items)) throw new Error('Invalid items');
+            for (const p of c.items) {
+              if (!Array.isArray(p.flavors)) throw new Error('Invalid positions');
+              for (const f of p.flavors) {
+                if (!Array.isArray(f.stores) || f.stores.some(i => !Number.isInteger(i) || i < 0 || i >= d.stores.length)) throw new Error('Invalid store index');
+                count++;
               }
             }
-          })().catch(()=>{console.error('Diagnostic failed');process.exitCode=1});
+          }
+          if (!count) throw new Error('Empty catalog');
+          console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
           JS
+
+      - name: Preview only - nothing published
+        if: ${{ !inputs.publish }}
+        run: echo 'Preview completed. data.json was not committed or pushed.'
+
