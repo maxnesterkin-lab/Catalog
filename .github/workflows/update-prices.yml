@@ -1,4 +1,4 @@
-name: Saby catalog safe preview 69
+name: Saby complete diagnostic 70
 on:
   workflow_dispatch:
     inputs:
@@ -8,107 +8,124 @@ on:
 permissions:
   contents: read
 jobs:
-  preview:
+  diagnostic:
     if: github.ref == 'refs/heads/saby-test-20261120-105612' && inputs.publish == false
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 135
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Prepare temporary preview script
+      - name: Prepare diagnostics
         run: |
-          node - <<'JS'
+          cat > diagnostic-70.js <<'DIAGNOSTIC_JS'
+          'use strict';
           const fs = require('node:fs');
-          let source = fs.readFileSync('update-script.js', 'utf8');
-          function replace(from, to) {
-            if (source.split(from).length !== 2) throw Error('Source mismatch: ' + from);
-            source = source.replace(from, to);
+          const {client, STORE_ORDER} = require('./update-script.js');
+          const KNOWN = ['11164','11835','726','7596','9279','7842','7898','12202','7788','11596','8113','9792','10046','10050','9612','10052','9274','8132','10317','10699','8428','12503','12646','8126','8473','8117','8124','8110','10048','8121','8118','8691','10237','10896','7730','10078','11837','11993','10331','10333','11565','13758','8156','10772','11564','11653','10293','14066'];
+          const report = {global:[], stock:[], stores:[], treeIssues:[], retests:[], summary:{}, complete:false};
+          const folders = new Map(), queue = [], productOwners = new Map();
+          const id = v => { if(v == null || String(v).trim()==='') throw Error('Missing ID'); return String(v); };
+          const norm = s => String(s ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
+          const number = v => v != null && typeof v !== 'boolean' && String(v).trim()!=='' && Number.isFinite(Number(v)) ? Number(v) : null;
+          const rows = (d,f) => {const v=d?.[f]; if(Array.isArray(v))return v; if(v && typeof v==='object'){ if('id' in v || 'name' in v)return [v]; const a=Object.values(v);if(a.every(x=>x&&typeof x==='object'&&!Array.isArray(x)))return a;} throw Error('Unexpected API field: '+f);};
+          const error = e => String(e?.message??e).slice(0,500);
+          const save = () => fs.writeFileSync('diagnostic-70.json',JSON.stringify(report,null,2));
+          function enqueue(hid,name,parent,source='tree'){
+           const k=hid===null?'ROOT':String(hid);
+           if(folders.has(k)) {const f=folders.get(k); if(source==='tree'&&f.source==='seed'){f.name=name;f.parent=parent;f.source='tree';} else if(source==='tree'&&f.parent!==parent)report.treeIssues.push({id:k,issue:'Folder has multiple parents',parent,previous:f.parent}); return f;}
+           const f={id:hid,name,parent,source,state:'pending',products:[]};folders.set(k,f);queue.push(f);return f;
           }
-          // Use exactly the successful test-67 request before any point/list or tree calls.
-          replace('await api.login();', `await api.login();
-          const oggoRows = [];
-          const oggoSeen = new Set();
-          const oggoCursors = new Set();
-          let oggoPosition, oggoComplete = false;
-          for (let page = 0; page < 100; page++) {
-            const d = await api.get('v2/nomenclature/list', {
-              folder:11164,pageSize:25,order:'after',withBalance:false,position:oggoPosition
-            });
-            const part = rows(d,'nomenclatures');
-            const more = typeof d.outcome === 'boolean' ? d.outcome : d.outcome?.hasMore;
-            log('EARLY OGGO page='+page+' rows='+part.length+' hasMore='+more);
-            for (const x of part) {
-              if (String(x.hierarchicalParent) !== '11164' || x.isParent || x.id == null)
-                throw Error('Invalid OGGO row');
-              const id = String(x.id);
-              if (oggoSeen.has(id)) throw Error('Duplicate OGGO ID');
-              oggoSeen.add(id); oggoRows.push(x);
+          async function read(api,params,mode,size){
+           const all=[],seen=new Set(),cursors=new Set();let position;
+           for(let page=0;page<3000;page++){
+            const p={...params,pageSize:size,...(mode==='cursor'?{order:'after',position}:{page})};
+            const d=await api.get('v2/nomenclature/list',p);const part=rows(d,'nomenclatures');
+            for(const x of part){if(params.folder!=null&&String(x.hierarchicalParent)!==String(params.folder))throw Error('Unexpected parent');const k=(x.isParent?'F:':'P:')+id(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k))throw Error('Duplicate row '+k);seen.add(k);all.push(x);}
+            const more=typeof d.outcome==='boolean'?d.outcome:d.outcome?.hasMore;
+            if(more===false)return all;
+            if(more!==true||!part.length)throw Error('Uncertain pagination');
+            if(mode==='cursor'){const next=id(part.at(-1).hierarchicalId);if(cursors.has(next))throw Error('Repeated cursor');cursors.add(next);position=next;}
+           }
+           throw Error('Page budget exceeded');
+          }
+          async function attempt(api,params,preferred='offset'){
+           const errors=[];
+           for(const mode of [preferred,preferred==='offset'?'cursor':'offset']){
+            try {const result=await read(api,params,mode,mode==='cursor'?25:100);return {ok:true,mode,errors,result};}
+            catch(e){errors.push({mode,error:error(e)});if(e.status===401||e.status===403||/budget exceeded/i.test(error(e)))break;}
+           }
+           return {ok:false,errors};
+          }
+          function accept(f,result){
+           f.state='ok';f.products=[];
+           for(const x of result){
+            const name=String(x.name??'').trim();if(!name)report.treeIssues.push({folder:f.id,issue:'Unnamed row'});
+            if(x.isParent){const hid=id(x.hierarchicalId??x.id);if(f.id===null&&norm(name)==='вывод из ассортимента')continue;if(hid===String(f.id)){report.treeIssues.push({folder:hid,issue:'Self reference'});continue;}enqueue(hid,name,f.id);}
+            else {const pid=id(x.id);if(f.id===null)report.treeIssues.push({id:pid,issue:'Root-level product'});if(productOwners.has(pid)&&productOwners.get(pid)!==f.id)report.treeIssues.push({id:pid,issue:'Product in multiple folders',previous:productOwners.get(pid),folder:f.id});productOwners.set(pid,f.id);f.products.push({id:pid,name,cost:number(x.cost),validPrice:number(x.cost)>0});}
+           }
+          }
+          async function scan(api,f,retest=false){
+           const a=await attempt(api,{folder:f.id,withBalance:false},f.id==='11164'?'cursor':'offset');
+           const item={id:f.id,name:f.name,source:f.source,ok:a.ok,mode:a.mode,errors:a.errors};
+           if(a.ok){try{accept(f,a.result);item.products=f.products.length;item.subfolders=a.result.filter(x=>x.isParent).length;}catch(e){item.ok=false;item.errors.push({error:error(e)});f.state='failed';}}
+           else f.state='failed';
+           (retest?report.retests:report.global).push(item);console.log(retest?'RETEST':'GLOBAL',JSON.stringify(item));save();
+          }
+          async function main(){
+           const api=client(process.env);await api.login();
+           enqueue(null,'ROOT',null);enqueue('11164','Ароматизатор пищевой OGGO 14ML',null,'seed');
+           // Prioritize known OGGO in the same authenticated session, then traverse the whole tree.
+           await scan(api,folders.get('11164'));
+           for(let i=0;i<queue.length;i++){if(queue[i].state==='pending')await scan(api,queue[i]);}
+           // Known folder IDs from run 69 are independent fallback entry points if a parent failed.
+           for(const hid of KNOWN)if(!folders.has(hid))enqueue(hid,hid==='11835'?'Ароматизатор пищевой MOLECULA 14ML':'Known folder '+hid,null,'seed');
+           for(let i=0;i<queue.length;i++){if(queue[i].state==='pending')await scan(api,queue[i]);}
+           // Reauthenticate before each failed folder; this tests timing/session dependence.
+           for(const f of [...folders.values()].filter(f=>f.state==='failed')){
+            try{const fresh=client(process.env);await fresh.login();await scan(fresh,f,true);}
+            catch(e){report.retests.push({id:f.id,name:f.name,ok:false,errors:[{error:error(e)}]});save();}
+           }
+           // A recovered parent can expose new children. Visit them as well.
+           for(let i=0;i<queue.length;i++){if(queue[i].state==='pending')await scan(api,queue[i]);}
+           try{
+            const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
+            const used=new Set();
+            for(const name of STORE_ORDER){const t=norm(name);const p=points.filter(x=>norm(x.name)===t||(t==='гаджиева'&&norm(x.name)==='гаджиево'));if(p.length!==1||p[0]?.id==null||used.has(String(p[0].id)))report.stores.push({name,ok:false,error:'Point not unique or missing'});else{const storeId=String(p[0].id);used.add(storeId);report.stores.push({name,id:storeId,ok:true});}}
+           }catch(e){report.stores.push({ok:false,error:error(e)});}
+           save();
+           const targets=[...folders.values()].filter(f=>f.id!==null&&(f.products.length||f.state!=='ok'));
+           // Query even globally failed folders by store; never equate absent data with zero.
+           for(const s of report.stores.filter(x=>x.ok)){
+            const storeApi=client(process.env);try{await storeApi.login();}catch(e){report.stock.push({store:s.name,ok:false,error:error(e),unscannedFolders:targets.length});save();continue;}
+            for(const f of targets){
+             const a=await attempt(storeApi,{folder:f.id,pointId:s.id,withBalance:true},f.id==='11164'||f.state!=='ok'?'cursor':'offset');
+             const rec={store:s.name,folder:f.name,id:f.id,ok:a.ok,mode:a.mode,errors:a.errors,expected:f.state==='ok'?f.products.length:null};
+             if(a.ok){const m=new Map(a.result.filter(x=>!x.isParent).map(x=>[id(x.id),x])); const expected=new Set(f.products.map(p=>p.id));rec.rows=m.size;rec.explicitZero=[...m.values()].filter(x=>number(x.balance)===0).length;rec.positive=[...m.values()].filter(x=>number(x.balance)>0).length;rec.missingIds=f.state==='ok'?f.products.filter(p=>!m.has(p.id)).map(p=>p.id):null;rec.unknownBalanceIds=f.state==='ok'?f.products.filter(p=>number(m.get(p.id)?.balance)===null).map(p=>p.id):null;rec.extraIds=f.state==='ok'?[...m.keys()].filter(k=>!expected.has(k)):null;rec.missingStorePriceIds=f.state==='ok'?f.products.filter(p=>!(number(m.get(p.id)?.cost)>0)).map(p=>p.id):null;for(const p of f.products)if(number(m.get(p.id)?.cost)>0)p.validPrice=true;}
+             report.stock.push(rec);console.log('STOCK',JSON.stringify({...rec,missingIds:rec.missingIds?.length,unknownBalanceIds:rec.unknownBalanceIds?.length,extraIds:rec.extraIds?.length,missingStorePriceIds:rec.missingStorePriceIds?.length}));save();
             }
-            if (more === false) { oggoComplete = true; break; }
-            if (more !== true || !part.length) throw Error('Uncertain OGGO pagination');
-            const next = part.at(-1)?.hierarchicalId;
-            if (next == null || oggoCursors.has(String(next))) throw Error('Invalid OGGO cursor');
-            oggoCursors.add(String(next)); oggoPosition = next;
+           }
+           report.noValidPrice=[...folders.values()].flatMap(f=>f.products.filter(p=>!p.validPrice).map(p=>({folder:f.name,id:p.id,name:p.name})));
+           report.summary={foldersDiscovered:folders.size-1,globalFailed:[...folders.values()].filter(f=>f.state!=='ok').map(f=>({id:f.id,name:f.name})),unlinkedKnownFolders:[...folders.values()].filter(f=>f.source==='seed').map(f=>({id:f.id,name:f.name})),products:productOwners.size,storesOK:report.stores.filter(s=>s.ok).length,storeFolderPairsExpected:targets.length*STORE_ORDER.length,storeFolderPairsCompleted:report.stock.filter(r=>r.id!=null).length,stockFailures:report.stock.filter(r=>!r.ok).length,unknownBalances:report.stock.reduce((n,r)=>n+(r.unknownBalanceIds?.length??0),0),unknownCoveragePairs:report.stock.filter(r=>!r.ok||r.expected===null).length,extraRows:report.stock.reduce((n,r)=>n+(r.extraIds?.length??0),0),noValidPrice:report.noValidPrice.length,treeIssues:report.treeIssues.length};
+           report.complete=true;save();console.log('FINAL SUMMARY',JSON.stringify(report.summary));
+           const s=report.summary;if(s.globalFailed.length||s.unlinkedKnownFolders.length||s.storesOK!==STORE_ORDER.length||s.stockFailures||s.unknownBalances||s.extraRows||s.noValidPrice||s.treeIssues||s.storeFolderPairsCompleted!==s.storeFolderPairsExpected)process.exitCode=1;
           }
-          if (!oggoComplete || !oggoRows.length) throw Error('Early OGGO incomplete');
-          log('EARLY OGGO COMPLETE: '+oggoRows.length+' unique products (previous test: 44)');
-          let oggoUsed = false;`);
-          replace('const arr=await folder(api,{folder:parent,withBalance:false});', `let arr;
-          if (String(parent)==='11164') {
-            if (oggoUsed) throw Error('Repeated OGGO traversal');
-            oggoUsed=true; arr=oggoRows;
-            log('OGGO CACHE USED: '+arr.length+' products');
-          } else arr=await folder(api,{folder:parent,withBalance:false});`);
-          replace('const roots=(await walk()).children;', `const roots=(await walk()).children;
-          if(!oggoUsed) throw Error('OGGO missing from catalog tree');`);
-          replace('if(d?.outcome?.hasMore===false) return all;', "if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)===false) return all;");
-          replace('if(d?.outcome?.hasMore!==true||!part.length)', "if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)!==true||!part.length)");
-          replace('const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});', `const results=await (String(n.hid)==='11164'
-            ? cursorPaged(api,{pointId:store.id,folder:11164,withBalance:true},25)
-            : folder(api,{pointId:store.id,folder:n.hid,withBalance:true}))
-            .catch(e=>{e.message+='; store='+store.name+' folder='+n.name+' id='+n.hid;throw e;});`);
-          replace('const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));', `const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
-          if(String(n.hid)==='11164') log('OGGO STOCK: store='+store.name+' rows='+mapped.size+' expected='+n.leaves.length+' unknown='+n.leaves.filter(l=>numeric(mapped.get(l.id)?.balance)===null).length);`);
-          fs.writeFileSync('preview-69.js',source);
-          JS
-          node --check preview-69.js
-      - name: Scan OGGO first then catalog without writing data
+          save();main().catch(e=>{report.fatal=error(e);save();console.error('FATAL',report.fatal);process.exitCode=1;});
+          DIAGNOSTIC_JS
+          node --check diagnostic-70.js
+      - name: Scan catalog and all stores
+        timeout-minutes: 120
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
-        run: |
-          node - <<'JS'
-          const fs = require('node:fs');
-          const {client,sync} = require('./preview-69.js');
-          const api = client(process.env);
-          const originalGet = api.get;
-          let sequence = 0;
-          api.get = async (path, params) => {
-            const id = ++sequence;
-            const details = JSON.stringify({path,...params});
-            const start=Date.now();
-            console.log('REQUEST',id,details);
-            try {
-              const result = await originalGet(path,params);
-              console.log('RESPONSE',id,'OK',Date.now()-start+'ms');
-              return result;
-            } catch(e) {
-              console.log('RESPONSE',id,'FAIL',e.message,Date.now()-start+'ms');
-              throw e;
-            }
-          };
-          (async()=>{
-            const prev = JSON.parse(fs.readFileSync('data.json','utf8'));
-            if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores)) throw Error('Unexpected data.json');
-            const result = await sync(api,prev);
-            console.log('PREVIEW COMPLETE: categories='+result.categories.length);
-          })().catch(e=>{console.error('PREVIEW STOPPED: '+e.message);process.exitCode=1;});
-          JS
-      - name: Publication disabled
+        run: node diagnostic-70.js
+      - name: Upload diagnostic report even on failure
         if: always()
-        run: echo 'NOTHING PUBLISHED - read-only workflow, no data file write or push step'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-diagnostic-70
+          path: diagnostic-70.json
+          if-no-files-found: warn
+          retention-days: 7
