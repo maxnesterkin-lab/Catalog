@@ -1,137 +1,142 @@
-name: Diagnose Saby API
+name: Diagnose Saby API - Test 72
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   diagnose:
+    if: startsWith(github.ref, 'refs/heads/saby-test-72-')
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 35
     steps:
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Read-only targeted diagnostics v4
+      - name: Test 72 - read-only stock comparison
+        timeout-minutes: 30
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
           node <<'JS'
-          const env = process.env;
+          const fs = require('node:fs');
+          const report = {test:72,checks:[],mapping:[],comparisons:[],summary:[],complete:false};
+          const save = () => fs.writeFileSync('diagnostic-72.json', JSON.stringify(report,null,2));
+          const sleep = ms => new Promise(r=>setTimeout(r,ms));
           const base = 'https://api.sbis.ru/retail/';
-          const query = 'BRUSKO Noir 25000';
-          const normalize = x => String(x ?? '').toLowerCase().trim().replace(/ё/g, 'е').replace(/^(sv|si)\s+/, '');
-          let token, calls = 0, failed = false, stage = 'startup';
-          const allowedErrors = /^(?:missing secrets|authorization failed|authorization JSON invalid|no token|network or timeout|invalid JSON|request budget reached|unexpected response shape(?: for (?:salesPoints|nomenclatures))?|HTTP [1-5][0-9]{2})$/;
-          const safeError = e => allowedErrors.test(String(e?.message)) ? e.message : 'unexpected error (details suppressed)';
-          const sleep = ms => new Promise(r => setTimeout(r, ms));
-          async function get(path, params) {
-            if (calls >= 40) throw Error('request budget reached');
-            calls++;
-            const u = new URL(path, base);
-            for (const [k,v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
-            await sleep(250);
-            let r;
-            try { r = await fetch(u, {headers:{'X-SBISAccessToken':token}, redirect:'error', signal:AbortSignal.timeout(15000)}); }
-            catch { throw Error('network or timeout'); }
-            console.log(`${path}: HTTP ${r.status}`);
-            if (!r.ok) throw Error('HTTP ' + r.status);
-            try { return await r.json(); } catch { throw Error('invalid JSON'); }
+          const stores = [{"name":"Баумана","pointId":14401,"warehouseId":14403,"companies":[249,14401]},{"name":"ГУМ","pointId":433,"warehouseId":303,"companies":[249,433]},{"name":"Гаджиева","pointId":14406,"warehouseId":14408,"companies":[249,14406]},{"name":"КТМ","pointId":14179,"warehouseId":14000,"companies":[249,14179]},{"name":"Крупской","pointId":16974,"warehouseId":16976,"companies":[249,16974]},{"name":"Книповича","pointId":14412,"warehouseId":14414,"companies":[249,14412]},{"name":"Кольский","pointId":446,"warehouseId":293,"companies":[249,446]},{"name":"Ленина","pointId":409,"warehouseId":305,"companies":[249,409]},{"name":"Мир","pointId":11101,"warehouseId":11103,"companies":[11091,11101]},{"name":"ПЗ","pointId":452,"warehouseId":309,"companies":[249,452]},{"name":"Североморск","pointId":18093,"warehouseId":18095,"companies":[17792,18093]}];
+          const samples = [{"folder":11164,"ids":[11172,11178,11176,11180,11175]},{"folder":11835,"ids":[11772,11773,11774,11775,11776]},{"folder":14496,"ids":[6220,6217,13756]}];
+          let token, count=0;
+          const norm = v=>String(v??'').toLowerCase().replace(/ё/g,'е').replace(/^(sv|si|severvape|север вейп)\s+/,'').trim();
+          const number = x => x==null || typeof x==='boolean' || String(x).trim()==='' || !Number.isFinite(Number(x)) ? null : Number(x);
+          const integer = x => { const n=number(x); return Number.isSafeInteger(n)&&n>0?n:null; };
+          const objectKeys = d=>d && typeof d==='object'?Object.keys(d).slice(0,20):[];
+          function rows(d, keys, idKeys){
+            let v=Array.isArray(d)?d:keys.map(k=>d?.[k]).find(x=>x!=null);
+            if(v&&typeof v==='object'&&!Array.isArray(v)) v=idKeys.some(k=>k in v)?[v]:Object.values(v);
+            if(!Array.isArray(v)||!v.every(x=>x&&typeof x==='object'&&!Array.isArray(x))) throw Error('Unrecognized response structure: '+objectKeys(d).join(','));
+            return v;
           }
-          function array(d, key) {
-            const v = d?.[key];
-            if (Array.isArray(v)) return v;
-            if (v && typeof v === 'object') {
-              if ('id' in v || 'name' in v) return [v];
-              const a = Object.values(v);
-              if (a.every(x=>x && typeof x==='object' && !Array.isArray(x))) return a;
+          async function login(){
+            const e=process.env;
+            if(!e.SABY_APP_ID||!e.SABY_APP_SECRET||!e.SABY_SECRET_KEY) throw Error('Missing repository secrets');
+            const r=await fetch('https://online.sbis.ru/oauth/service/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_client_id:e.SABY_APP_ID,app_secret:e.SABY_APP_SECRET,secret_key:e.SABY_SECRET_KEY}),redirect:'error',signal:AbortSignal.timeout(15000)});
+            if(!r.ok) throw Error('Authorization HTTP '+r.status);
+            const d=await r.json();token=d.token||d.access_token;if(typeof token!=='string'||!token)throw Error('No access token');
+            console.log('Authorization successful');
+          }
+          async function get(path,params,label,encoding='repeat'){
+            if(++count>120) throw Error('Request budget exceeded');
+            await sleep(2000);
+            const u=new URL(path,base);
+            for(const [k,v] of Object.entries(params)) {
+              if(Array.isArray(v)){if(encoding==='json')u.searchParams.set(k,JSON.stringify(v));else for(const x of v)u.searchParams.append(k,String(x));}
+              else if(v!=null)u.searchParams.set(k,String(v));
             }
-            throw Error('unexpected response shape for ' + key);
+            const rec={number:count,label,status:null,ms:null};let start=Date.now();
+            try{
+              const r=await fetch(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(12000)});rec.status=r.status;
+              if(!r.ok)throw Error('HTTP '+r.status);
+              return await r.json();
+            } catch(e){throw Error(rec.status&&!String(e.message).startsWith('HTTP')?'Invalid response or JSON':rec.status?'HTTP '+rec.status:'Network or timeout');}
+            finally{rec.ms=Date.now()-start;report.checks.push(rec);console.log(`${rec.number} ${label}: ${rec.status??'network'} (${rec.ms} ms)`);save();}
           }
-          async function read(params, size) {
-            let a = [];
-            for (let page=0; page<6; page++) {
-              const d = await get('v2/nomenclature/list', {...params, pageSize:size, page});
-              const part = array(d, 'nomenclatures');
-              a.push(...part);
-              if (d?.outcome?.hasMore === false) return a;
-              if (d?.outcome?.hasMore !== true || !part.length) throw Error('pagination uncertain');
+          async function attempt(label,fn){try{return await fn();}catch(e){console.log(label+': '+e.message);report.checks.push({label,error:e.message});save();return null;}}
+          async function catalog(folder,pointId,withBalance){
+            const out=[],seen=new Set();
+            for(let page=0;page<5;page++){
+              const d=await get('v2/nomenclature/list',{folder,pointId,withBalance,page,pageSize:25},`catalog ${folder} point=${pointId??'global'} page=${page}`);
+              const a=rows(d,['nomenclatures'],['id']);
+              for(const x of a){if(x.isParent)continue;const id=integer(x.id);if(id==null||seen.has(id))throw Error('Missing or duplicate catalog ID');seen.add(id);out.push(x);}
+              const more=typeof d.outcome==='boolean'?d.outcome:d.outcome?.hasMore;
+              if(more===false)return out;
+              if(more!==true||!a.length)throw Error('Pagination uncertain');
+            }throw Error('Page budget exceeded');
+          }
+          function balanceMap(a, key){const m=new Map();for(const x of a){const id=integer(x[key]);if(id==null||m.has(id))throw Error('Missing or duplicate balance ID');m.set(id,number(x.balance));}return m;}
+          async function newBalances(m, companies, ids){
+            const label='direct '+m.name+' company='+companies.join(',');
+            const params={nomenclatures:ids,warehouses:[m.warehouseId],companies};
+            let raw;
+            try { raw=await get('nomenclature/balances',params,label); }
+            catch(e){
+              if(!['HTTP 400','HTTP 422'].includes(e.message))throw e;
+              raw=await get('nomenclature/balances',params,label+' JSON arrays','json');
             }
-            throw Error('page budget reached');
-          }
-          async function probe(label, pointId, withBalance) {
-            const params = {pointId, withBalance};
-            try {
-              let a;
-              try { a = await read({...params,searchString:query},25); }
-              catch(e) {
-                console.log(label+' search: '+e.message);
-                if (e.message!=='HTTP 500') throw e;
-                a = await read({...params,searchString:query},5);
-              }
-              const matches = x=>normalize(x.name).includes(normalize(query));
-              const result = a.filter(x=>!x.isParent && matches(x));
-              const folders = a.filter(x=>x.isParent && normalize(x.name)===normalize(query));
-              const hids = [...new Set(folders.map(x=>x.hierarchicalId).filter(x=>x!=null))];
-              console.log(`${label}: search rows=${a.length}; matching leaves=${result.length}; matching folders=${folders.length}`);
-              let source = result;
-              if (hids.length === 1) {
-                try {
-                  const f = await read({...params,folder:hids[0]},25);
-                  if (f.some(x=>x.isParent)) throw Error('nested folders; result not complete');
-                  source = f;
-                  console.log(label+' folder: HTTP OK; rows='+source.length);
-                } catch(e) {
-                  console.log(label+' folder: '+e.message+'; search result only');
-                  failed = true;
-                }
-              } else {
-                console.log(label+': search results only; folder completeness not established');
-              }
-              const unique = new Map();
-              let missing = 0;
-              for(const x of source) { if(x.id==null) missing++; else unique.set(String(x.id),x); }
-              const known = [...unique.values()].filter(x=>x.balance!=null && String(x.balance).trim()!=='' && Number.isFinite(Number(x.balance)));
-              console.log(`${label}: unique IDs=${unique.size}; missing IDs=${missing}` + (withBalance ? `; positive=${known.filter(x=>Number(x.balance)>0).length}; nonpositive=${known.filter(x=>Number(x.balance)<=0).length}; unknown=${unique.size-known.length}` : ''));
-              return new Set(unique.keys());
-            } catch(e) { failed=true; console.log(label+' ERROR: '+e.message); return null; }
+            const arr=rows(raw,['balances','nomenclatures','items','data','result'],['nomenclature']);
+            const balances=balanceMap(arr,'nomenclature');
+            if([...balances.keys()].some(id=>!ids.includes(id)))throw Error('Unexpected product ID in balance response');
+            return balances;
           }
           async function main(){
-            stage='check secrets';
-            if(!env.SABY_APP_ID||!env.SABY_APP_SECRET||!env.SABY_SECRET_KEY) throw Error('missing secrets');
-            stage='authorization request';
-            const r=await fetch('https://online.sbis.ru/oauth/service/',{method:'POST',headers:{'Content-Type':'application/json'},redirect:'error',signal:AbortSignal.timeout(15000),body:JSON.stringify({app_client_id:env.SABY_APP_ID,app_secret:env.SABY_APP_SECRET,secret_key:env.SABY_SECRET_KEY})});
-            console.log('Authorization: HTTP '+r.status);
-            if(!r.ok) throw Error('authorization failed');
-            stage='authorization JSON';
-            let auth; try { auth=await r.json(); } catch { throw Error('authorization JSON invalid'); }
-            stage='extract access token';
-            token=auth?.token||auth?.access_token;
-            if(typeof token!=='string'||!token) throw Error('no token');
-            console.log('::add-mask::'+token.replace(/[\r\n]/g,''));
-            console.log('Access token received (hidden)');
-            stage='request sales points';
-            console.log('Requesting sales points');
-            const p=await get('point/list',{product:'retail',pageSize:100,page:0});
-            stage='parse sales points';
-            console.log('salesPoints field type: '+(Array.isArray(p?.salesPoints)?'array':typeof p?.salesPoints));
-            const points=array(p,'salesPoints');
-            console.log('Sales points: '+points.length);
-            stage='targeted catalog checks';
-            const global=await probe('GLOBAL',null,false);
-            for(const name of ['Гаджиево','Баумана']){
-              const matches=points.filter(x=>(normalize(x.name)===normalize(name) || (name==='Гаджиево' && normalize(x.name)==='гаджиева')));
-              if(matches.length!==1||matches[0].id==null){failed=true;console.log(name+': point not uniquely found');continue;}
-              const noBalance=await probe(name+' balance=false',matches[0].id,false);
-              const balance=await probe(name+' balance=true',matches[0].id,true);
-              if(global&&noBalance) console.log(name+' matched global='+[...noBalance].filter(x=>global.has(x)).length);
-              if(noBalance&&balance) console.log(name+' absent in balance response='+[...noBalance].filter(x=>!balance.has(x)).length+' (not proof of zero stock)');
+            save();await login();
+            const points=await attempt('point list',async()=>rows(await get('point/list',{product:'retail',pageSize:100,page:0},'point list'),['salesPoints'],['id']));
+            const ids=[...new Set(samples.flatMap(s=>s.ids))];
+            report.samples=samples;report.mapping=stores;
+            for(const m of stores){
+              const validPoint=(points??[]).some(p=>integer(p.id)===m.pointId&&(norm(p.name)===norm(m.name)||m.name==='Гаджиева'&&norm(p.name)==='гаджиево'));
+              m.verifiedPoint=validPoint;
+              if(!validPoint){report.summary.push({store:m.name,status:'point-not-verified'});save();continue;}
+              // Read old stock immediately before new stock; no writes or publication.
+              const oldMaps=new Map();
+              for(const sample of samples){
+                const old=await attempt('old '+m.name+' '+sample.folder,async()=>balanceMap(await catalog(sample.folder,m.pointId,true),'id'));
+                oldMaps.set(sample.folder,old);
+              }
+              // Keep separate legal-entity scopes: never sum the same warehouse blindly.
+              const scopes=m.companies.map(c=>[c]);
+              if(m.companies.length>1)scopes.push(m.companies.slice());
+              for(const companies of scopes){
+                const raw=await attempt('direct '+m.name+' '+companies.join(','),()=>newBalances(m,companies,ids));
+                const summary={store:m.name,warehouseId:m.warehouseId,companies,requestOK:raw!==null,equal:0,different:0,unknown:0,positiveMatches:0,explicitZeroMatches:0,missingNewWithOldZero:0,missingNewWithOldPositive:0};
+                for(const sample of samples){
+                  const old=oldMaps.get(sample.folder);
+                  for(const id of sample.ids){
+                    const a=old?.get(id)??null,b=raw?.get(id)??null;
+                    const status=a===null||b===null?'unknown':a===b?'equal':'different';
+                    summary[status]++;
+                    if(status==='equal'&&a>0)summary.positiveMatches++;
+                    if(status==='equal'&&a===0)summary.explicitZeroMatches++;
+                    if(raw!==null&&!raw.has(id)&&a===0)summary.missingNewWithOldZero++;
+                    if(raw!==null&&!raw.has(id)&&a>0)summary.missingNewWithOldPositive++;
+                    report.comparisons.push({store:m.name,warehouseId:m.warehouseId,companies,folder:sample.folder,id,old:a,new:b,oldRequestOK:old!==null,newRequestOK:raw!==null,oldReturned:old?.has(id)??false,newReturned:raw?.has(id)??false,status});
+                  }
+                }
+                report.summary.push(summary);save();
+              }
             }
-            console.log('Diagnostics finished; API GET requests: '+calls);
-            console.log('Read-only test; no data published.');
-            if(failed) process.exitCode=1;
+            report.complete=true;
+            report.allPointsVerified=stores.every(x=>x.verifiedPoint);
+            report.allStoresCompared=stores.every(m=>report.summary.some(x=>x.store===m.name&&x.requestOK&&x.equal+x.different>0));
+            save();
           }
-          main().catch(e=>{console.error('Diagnostics failed at '+stage+': '+safeError(e));console.log('API GET requests: '+calls);process.exitCode=1;});
+          main().catch(e=>{report.fatal=e.message;save();console.error(e.message);process.exitCode=1;});
           JS
+      - name: Upload diagnostic report even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-72
+          path: diagnostic-72.json
+          if-no-files-found: warn
