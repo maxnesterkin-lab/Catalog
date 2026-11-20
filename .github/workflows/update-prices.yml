@@ -1,69 +1,84 @@
-name: Saby full catalog preview
-
-# Temporary maintenance mode: scheduled runs are disabled until validation.
+name: OGGO detailed diagnostic
 on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish data.json to main (leave unchecked for preview)'
         type: boolean
-        required: true
         default: false
-
 permissions:
   contents: read
-
-concurrency:
-  group: saby-catalog-test
-  cancel-in-progress: false
-
 jobs:
-  update-data:
-    if: github.ref == 'refs/heads/saby-test-20261120-105612'
+  diagnostic:
+    if: github.ref == 'refs/heads/saby-test-20261120-105612' && !inputs.publish
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 25
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Run script to fetch data from Saby
+      - name: Test OGGO
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
-          set -euo pipefail
-          git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
-          node update-script.js
           node - <<'JS'
-          const fs = require('node:fs');
-          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
-          if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
-            throw new Error('Unexpected catalog structure; publication blocked');
+          const {client,STORE_ORDER}=require('./update-script.js');
+          const api=client(process.env);
+          let failures=0;
+          function rows(v){
+            if(Array.isArray(v))return v;
+            if(v && typeof v==='object')return 'id' in v?[v]:Object.values(v);
+            throw Error('Unexpected API rows');
           }
-          let count = 0;
-          for (const c of d.categories) {
-            if (!Array.isArray(c.items)) throw new Error('Invalid items');
-            for (const p of c.items) {
-              if (!Array.isArray(p.flavors)) throw new Error('Invalid positions');
-              for (const f of p.flavors) {
-                if (!Array.isArray(f.stores) || f.stores.some(i => !Number.isInteger(i) || i < 0 || i >= d.stores.length)) throw new Error('Invalid store index');
-                count++;
+          const norm=s=>String(s).trim().toLowerCase()
+            .replace(/\u0451/g,'\u0435').replace(/^(sv|si)\s+/,'');
+          async function test(name,params){
+            let position;
+            const seen=new Set(),cursors=new Set();
+            try{
+              for(let page=0;page<20;page++){
+                console.log(name,'page='+page,'cursor='+(position??'START'));
+                const d=await api.get('v2/nomenclature/list',{
+                  folder:11164,pageSize:25,order:'after',...params,position
+                });
+                const r=rows(d.nomenclatures);
+                const more=typeof d.outcome==='boolean'?d.outcome:d.outcome?.hasMore;
+                console.log(name,'OK','rows='+r.length,'hasMore='+more,
+                  'balances='+r.filter(x=>x.balance!=null).length,
+                  'prices='+r.filter(x=>x.cost!=null).length);
+                for(const x of r){
+                  if(String(x.hierarchicalParent)!=='11164')throw Error('Unexpected parent');
+                  if(x.id==null||seen.has(String(x.id)))throw Error('Missing or duplicate ID');
+                  seen.add(String(x.id));
+                }
+                if(more===false){
+                  if(seen.size===0)throw Error('Empty folder response');
+                  console.log(name,'COMPLETE','unique='+seen.size);return true;
+                }
+                const next=r.at(-1)?.hierarchicalId;
+                if(more!==true||next==null||cursors.has(String(next)))throw Error('Invalid cursor');
+                cursors.add(String(next));position=next;
               }
-            }
+              throw Error('Page limit');
+            }catch(e){failures++;console.log(name,'FAILED',e.message);return false;}
           }
-          if (!count) throw new Error('Empty catalog');
-          console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
+          (async()=>{
+            await api.login();
+            await test('OGGO GLOBAL',{withBalance:false});
+            const points=rows((await api.get('point/list',{product:'retail',pageSize:100})).salesPoints);
+            for(const name of STORE_ORDER){
+              const p=points.filter(x=>norm(x.name)===norm(name)||
+                (norm(name)==='\u0433\u0430\u0434\u0436\u0438\u0435\u0432\u0430'&&norm(x.name)==='\u0433\u0430\u0434\u0436\u0438\u0435\u0432\u043e'));
+              if(p.length!==1){failures++;console.log(name,'POINT NOT UNIQUE');continue;}
+              await test(name+' WITHOUT BALANCE',{pointId:p[0].id,withBalance:false});
+              await test(name+' WITH BALANCE',{pointId:p[0].id,withBalance:true});
+            }
+            console.log('FAILED TESTS:',failures);
+            console.log('NOTHING PUBLISHED');
+            if(failures)process.exitCode=1;
+          })().catch(e=>{console.error(e.message);process.exitCode=1;});
           JS
-
-      - name: Preview only - nothing published
-        if: ${{ !inputs.publish }}
-        run: echo 'Preview completed. data.json was not committed or pushed.'
-
