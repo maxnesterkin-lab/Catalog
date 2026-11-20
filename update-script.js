@@ -84,7 +84,7 @@ const name=String(x.name??'').trim(); if(!name) throw Error('Unnamed catalog row
 if(x.isParent){
 if(parent===null&&EXCLUDE_ROOTS.includes(normalize(name)))continue;
 const hid=key(x.hierarchicalId??x.id);if(nodes.has(hid))throw Error('Duplicate catalog folder');nodes.add(hid);
-const sub=await walk(hid,depth+1);children.push({name,hid,...sub});
+const sub=await walk(hid,depth+1).catch(e=>{if(!e.folderContext){e.message+="; folder="+JSON.stringify(name)+" id="+hid;e.folderContext=true;}throw e;});children.push({name,hid,...sub});
 } else {
 if(parent===null)throw Error('Root-level product requires catalog mapping');
 const id=key(x.id);if(ids.has(id))throw Error('Duplicate catalog product ID');ids.add(id);
