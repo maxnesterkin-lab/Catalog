@@ -1,4 +1,4 @@
-name: Saby catalog safe preview 68
+name: Saby catalog safe preview 69
 on:
   workflow_dispatch:
     inputs:
@@ -7,14 +7,11 @@ on:
         default: false
 permissions:
   contents: read
-concurrency:
-  group: saby-preview-68
-  cancel-in-progress: false
 jobs:
   preview:
-    if: github.ref == 'refs/heads/saby-test-20261120-105612' && !inputs.publish
+    if: github.ref == 'refs/heads/saby-test-20261120-105612' && inputs.publish == false
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,35 +22,93 @@ jobs:
       - name: Prepare temporary preview script
         run: |
           node - <<'JS'
-          const fs=require('node:fs');
-          let s=fs.readFileSync('update-script.js','utf8');
-          const replace=(from,to)=>{
-            if(s.split(from).length!==2)throw Error('Source mismatch: '+from);
-            s=s.replace(from,to);
-          };
-          if(!s.includes('async function cursorPaged('))throw Error('Missing cursor implementation');
-          replace('async function folder(api,params){',`async function folder(api,params){
-            if(String(params.folder)==='11164'){
-              const result=await cursorPaged(api,params,25);
-              console.log('OGGO cursor OK: point='+(params.pointId??'global')+' rows='+result.length);
-              return result;
-            }`);
-          replace('if(d?.outcome?.hasMore===false) return all;',"if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)===false) return all;");
-          replace('if(d?.outcome?.hasMore!==true||!part.length)',"if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)!==true||!part.length)");
-          replace('const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});',`const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true}).catch(e=>{e.message+='; store='+store.name+' folder='+n.name+' id='+n.hid;throw e;});`);
-          replace('const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));',`const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
-            const absent=n.leaves.filter(l=>!mapped.has(l.id)).length;
-            const invalid=n.leaves.filter(l=>mapped.has(l.id)&&numeric(mapped.get(l.id).balance)===null).length;
-            if(absent||invalid)log('UNKNOWN stock: store='+store.name+' folder='+n.name+' id='+n.hid+' absent='+absent+' invalid='+invalid+' expected='+n.leaves.length);`);
-          fs.writeFileSync('preview-68.js',s);
+          const fs = require('node:fs');
+          let source = fs.readFileSync('update-script.js', 'utf8');
+          function replace(from, to) {
+            if (source.split(from).length !== 2) throw Error('Source mismatch: ' + from);
+            source = source.replace(from, to);
+          }
+          // Use exactly the successful test-67 request before any point/list or tree calls.
+          replace('await api.login();', `await api.login();
+          const oggoRows = [];
+          const oggoSeen = new Set();
+          const oggoCursors = new Set();
+          let oggoPosition, oggoComplete = false;
+          for (let page = 0; page < 100; page++) {
+            const d = await api.get('v2/nomenclature/list', {
+              folder:11164,pageSize:25,order:'after',withBalance:false,position:oggoPosition
+            });
+            const part = rows(d,'nomenclatures');
+            const more = typeof d.outcome === 'boolean' ? d.outcome : d.outcome?.hasMore;
+            log('EARLY OGGO page='+page+' rows='+part.length+' hasMore='+more);
+            for (const x of part) {
+              if (String(x.hierarchicalParent) !== '11164' || x.isParent || x.id == null)
+                throw Error('Invalid OGGO row');
+              const id = String(x.id);
+              if (oggoSeen.has(id)) throw Error('Duplicate OGGO ID');
+              oggoSeen.add(id); oggoRows.push(x);
+            }
+            if (more === false) { oggoComplete = true; break; }
+            if (more !== true || !part.length) throw Error('Uncertain OGGO pagination');
+            const next = part.at(-1)?.hierarchicalId;
+            if (next == null || oggoCursors.has(String(next))) throw Error('Invalid OGGO cursor');
+            oggoCursors.add(String(next)); oggoPosition = next;
+          }
+          if (!oggoComplete || !oggoRows.length) throw Error('Early OGGO incomplete');
+          log('EARLY OGGO COMPLETE: '+oggoRows.length+' unique products (previous test: 44)');
+          let oggoUsed = false;`);
+          replace('const arr=await folder(api,{folder:parent,withBalance:false});', `let arr;
+          if (String(parent)==='11164') {
+            if (oggoUsed) throw Error('Repeated OGGO traversal');
+            oggoUsed=true; arr=oggoRows;
+            log('OGGO CACHE USED: '+arr.length+' products');
+          } else arr=await folder(api,{folder:parent,withBalance:false});`);
+          replace('const roots=(await walk()).children;', `const roots=(await walk()).children;
+          if(!oggoUsed) throw Error('OGGO missing from catalog tree');`);
+          replace('if(d?.outcome?.hasMore===false) return all;', "if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)===false) return all;");
+          replace('if(d?.outcome?.hasMore!==true||!part.length)', "if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)!==true||!part.length)");
+          replace('const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});', `const results=await (String(n.hid)==='11164'
+            ? cursorPaged(api,{pointId:store.id,folder:11164,withBalance:true},25)
+            : folder(api,{pointId:store.id,folder:n.hid,withBalance:true}))
+            .catch(e=>{e.message+='; store='+store.name+' folder='+n.name+' id='+n.hid;throw e;});`);
+          replace('const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));', `const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
+          if(String(n.hid)==='11164') log('OGGO STOCK: store='+store.name+' rows='+mapped.size+' expected='+n.leaves.length+' unknown='+n.leaves.filter(l=>numeric(mapped.get(l.id)?.balance)===null).length);`);
+          fs.writeFileSync('preview-69.js',source);
           JS
-          node --check preview-68.js
-      - name: Scan complete catalog without publishing
+          node --check preview-69.js
+      - name: Scan OGGO first then catalog without writing data
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
-        run: node preview-68.js
+        run: |
+          node - <<'JS'
+          const fs = require('node:fs');
+          const {client,sync} = require('./preview-69.js');
+          const api = client(process.env);
+          const originalGet = api.get;
+          let sequence = 0;
+          api.get = async (path, params) => {
+            const id = ++sequence;
+            const details = JSON.stringify({path,...params});
+            const start=Date.now();
+            console.log('REQUEST',id,details);
+            try {
+              const result = await originalGet(path,params);
+              console.log('RESPONSE',id,'OK',Date.now()-start+'ms');
+              return result;
+            } catch(e) {
+              console.log('RESPONSE',id,'FAIL',e.message,Date.now()-start+'ms');
+              throw e;
+            }
+          };
+          (async()=>{
+            const prev = JSON.parse(fs.readFileSync('data.json','utf8'));
+            if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores)) throw Error('Unexpected data.json');
+            const result = await sync(api,prev);
+            console.log('PREVIEW COMPLETE: categories='+result.categories.length);
+          })().catch(e=>{console.error('PREVIEW STOPPED: '+e.message);process.exitCode=1;});
+          JS
       - name: Publication disabled
         if: always()
-        run: echo 'NOTHING PUBLISHED - read-only workflow, no push step'
+        run: echo 'NOTHING PUBLISHED - read-only workflow, no data file write or push step'
