@@ -48,19 +48,36 @@ throw Error('API retry limit');
 return {login,get,count:()=>requests};
 }
 async function paged(api,params,size){
-const all=[];const seen=new Set();
-for(let page=0;page<3000;page++){
-const d=await api.get('v2/nomenclature/list',{...params,pageSize:size,page});
-const part=rows(d,'nomenclatures');
-for(const x of part){const k=(x.isParent?'F:':'P:')+key(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k)) throw Error('Duplicate row during pagination');seen.add(k);all.push(x);}
-if(d?.outcome?.hasMore===false) return all;
-if(d?.outcome?.hasMore!==true||!part.length) throw Error('Uncertain pagination');
-}
-throw Error('Page budget exceeded');
+ const all=[],seen=new Set(),cursors=new Set();
+ let position;
+ for(let page=0;page<3000;page++){
+  const d=await api.get('v2/nomenclature/list',{
+   ...params,pageSize:size,order:'after',position
+  });
+  const part=rows(d,'nomenclatures');
+  for(const x of part){
+   if(params.folder!=null &&
+      String(x.hierarchicalParent)!==String(params.folder))
+     throw Error('Unexpected parent folder');
+   const k=(x.isParent?'F:':'P:')+
+     key(x.isParent?(x.hierarchicalId??x.id):x.id);
+   if(seen.has(k))throw Error('Duplicate cursor row');
+   seen.add(k);all.push(x);
+  }
+  const more=typeof d.outcome==='boolean'
+    ?d.outcome:d.outcome?.hasMore;
+  if(more===false)return all;
+  if(more!==true||!part.length)
+    throw Error('Uncertain pagination');
+  const next=key(part[part.length-1].hierarchicalId);
+  if(cursors.has(next))throw Error('Repeated cursor');
+  cursors.add(next);position=next;
+ }
+ throw Error('Cursor page budget exceeded');
 }
 async function folder(api, params){
 let err;
-for(const size of [100,30,10,3,1]){
+for(const size of [25,10,3,1]){
 try{return await paged(api,params,size);}catch(e){err=e;if(!(e.status>=500))throw e;}
 }
 throw err;
