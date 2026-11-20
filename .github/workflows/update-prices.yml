@@ -1,4 +1,4 @@
-name: OGGO detailed diagnostic
+name: Saby catalog safe preview 68
 on:
   workflow_dispatch:
     inputs:
@@ -7,11 +7,14 @@ on:
         default: false
 permissions:
   contents: read
+concurrency:
+  group: saby-preview-68
+  cancel-in-progress: false
 jobs:
-  diagnostic:
+  preview:
     if: github.ref == 'refs/heads/saby-test-20261120-105612' && !inputs.publish
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,66 +22,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test OGGO
+      - name: Prepare temporary preview script
+        run: |
+          node - <<'JS'
+          const fs=require('node:fs');
+          let s=fs.readFileSync('update-script.js','utf8');
+          const replace=(from,to)=>{
+            if(s.split(from).length!==2)throw Error('Source mismatch: '+from);
+            s=s.replace(from,to);
+          };
+          if(!s.includes('async function cursorPaged('))throw Error('Missing cursor implementation');
+          replace('async function folder(api,params){',`async function folder(api,params){
+            if(String(params.folder)==='11164'){
+              const result=await cursorPaged(api,params,25);
+              console.log('OGGO cursor OK: point='+(params.pointId??'global')+' rows='+result.length);
+              return result;
+            }`);
+          replace('if(d?.outcome?.hasMore===false) return all;',"if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)===false) return all;");
+          replace('if(d?.outcome?.hasMore!==true||!part.length)',"if((typeof d.outcome==='boolean'?d.outcome:d?.outcome?.hasMore)!==true||!part.length)");
+          replace('const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});',`const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true}).catch(e=>{e.message+='; store='+store.name+' folder='+n.name+' id='+n.hid;throw e;});`);
+          replace('const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));',`const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
+            const absent=n.leaves.filter(l=>!mapped.has(l.id)).length;
+            const invalid=n.leaves.filter(l=>mapped.has(l.id)&&numeric(mapped.get(l.id).balance)===null).length;
+            if(absent||invalid)log('UNKNOWN stock: store='+store.name+' folder='+n.name+' id='+n.hid+' absent='+absent+' invalid='+invalid+' expected='+n.leaves.length);`);
+          fs.writeFileSync('preview-68.js',s);
+          JS
+          node --check preview-68.js
+      - name: Scan complete catalog without publishing
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
-        run: |
-          node - <<'JS'
-          const {client,STORE_ORDER}=require('./update-script.js');
-          const api=client(process.env);
-          let failures=0;
-          function rows(v){
-            if(Array.isArray(v))return v;
-            if(v && typeof v==='object')return 'id' in v?[v]:Object.values(v);
-            throw Error('Unexpected API rows');
-          }
-          const norm=s=>String(s).trim().toLowerCase()
-            .replace(/\u0451/g,'\u0435').replace(/^(sv|si)\s+/,'');
-          async function test(name,params){
-            let position;
-            const seen=new Set(),cursors=new Set();
-            try{
-              for(let page=0;page<20;page++){
-                console.log(name,'page='+page,'cursor='+(position??'START'));
-                const d=await api.get('v2/nomenclature/list',{
-                  folder:11164,pageSize:25,order:'after',...params,position
-                });
-                const r=rows(d.nomenclatures);
-                const more=typeof d.outcome==='boolean'?d.outcome:d.outcome?.hasMore;
-                console.log(name,'OK','rows='+r.length,'hasMore='+more,
-                  'balances='+r.filter(x=>x.balance!=null).length,
-                  'prices='+r.filter(x=>x.cost!=null).length);
-                for(const x of r){
-                  if(String(x.hierarchicalParent)!=='11164')throw Error('Unexpected parent');
-                  if(x.id==null||seen.has(String(x.id)))throw Error('Missing or duplicate ID');
-                  seen.add(String(x.id));
-                }
-                if(more===false){
-                  if(seen.size===0)throw Error('Empty folder response');
-                  console.log(name,'COMPLETE','unique='+seen.size);return true;
-                }
-                const next=r.at(-1)?.hierarchicalId;
-                if(more!==true||next==null||cursors.has(String(next)))throw Error('Invalid cursor');
-                cursors.add(String(next));position=next;
-              }
-              throw Error('Page limit');
-            }catch(e){failures++;console.log(name,'FAILED',e.message);return false;}
-          }
-          (async()=>{
-            await api.login();
-            await test('OGGO GLOBAL',{withBalance:false});
-            const points=rows((await api.get('point/list',{product:'retail',pageSize:100})).salesPoints);
-            for(const name of STORE_ORDER){
-              const p=points.filter(x=>norm(x.name)===norm(name)||
-                (norm(name)==='\u0433\u0430\u0434\u0436\u0438\u0435\u0432\u0430'&&norm(x.name)==='\u0433\u0430\u0434\u0436\u0438\u0435\u0432\u043e'));
-              if(p.length!==1){failures++;console.log(name,'POINT NOT UNIQUE');continue;}
-              await test(name+' WITHOUT BALANCE',{pointId:p[0].id,withBalance:false});
-              await test(name+' WITH BALANCE',{pointId:p[0].id,withBalance:true});
-            }
-            console.log('FAILED TESTS:',failures);
-            console.log('NOTHING PUBLISHED');
-            if(failures)process.exitCode=1;
-          })().catch(e=>{console.error(e.message);process.exitCode=1;});
-          JS
+        run: node preview-68.js
+      - name: Publication disabled
+        if: always()
+        run: echo 'NOTHING PUBLISHED - read-only workflow, no push step'
