@@ -1,8 +1,8 @@
-name: Diagnose Saby API - Test 83
+name: Diagnose Saby API - Test 85
 on:
   push:
     branches:
-      - test-catalog-v83-20261123
+      - test-catalog-v85-20261123
     paths:
       - .github/workflows/diagnose-saby-v2.yml
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.ref == 'refs/heads/test-catalog-v83-20261123'
+    if: github.ref == 'refs/heads/test-catalog-v85-20261123'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Diagnose 181 missing-stock variants (read only)
+      - name: Diagnose 12 completely unknown stock products (read only)
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
@@ -51,13 +51,13 @@ jobs:
             {name:'Североморск',pointId:18093,warehouseId:18095,companyId:17792},
           ];
           const report = {
-            test:83, branch:'test-catalog-v83-20261123',
+            test:85, branch:'test-catalog-v85-20261123',
             mode:'READ_ONLY_NO_PUBLISH', startedAt:new Date().toISOString(),
-            source:'data.json schemaVersion=81; direct Saby balances API',
+            source:'data.json schemaVersion=84; Saby missing balance and folder audits',
             requestCount:0, targetCount:0, stores:[], controls:[], errors:[],
             completed:false, allRequestsSucceeded:false
           };
-          const save = () => fs.writeFileSync('diagnostic-83.json', JSON.stringify(report,null,2));
+          const save = () => fs.writeFileSync('diagnostic-85.json', JSON.stringify(report,null,2));
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
           const norm = v => String(v??'').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
@@ -70,22 +70,22 @@ jobs:
             return v;
           }
           const d=JSON.parse(fs.readFileSync('data.json','utf8'));
-          if(d.schemaVersion!=='81'||d.previewOnly!==true||d.stores?.length!==stores.length)
+          if(d.schemaVersion!=='84'||d.previewOnly!==true||d.stores?.length!==stores.length)
             throw Error('Unexpected test catalog snapshot; no API calls performed');
           if(stores.some((s,i)=>s.name!==d.stores[i]))
             throw Error('Store order changed; no API calls performed');
           const positions=d.categories.flatMap(c=>c.items.flatMap(p=>p.flavors));
-          const target=positions.filter(f=>Array.isArray(f.stockStatus)&&f.stockStatus.includes('missing'));
+          const target=positions.filter(f=>Array.isArray(f.stockStatus)&&f.stockStatus.length===11&&f.stockStatus.every(s=>s==='missing'));
           const ids=target.map(f=>int(f.id));
-          if(target.length!==181||ids.some(id=>id===null)||new Set(ids).size!==ids.length||
+          if(target.length!==12||ids.some(id=>id===null)||new Set(ids).size!==ids.length||
              target.some(f=>f.stockStatus.length!==11||f.stockStatus.some(s=>s!=='missing'))||
-             d.verification?.restoredWithUnknownStock!==181)
+             d.verification?.liveApiDiagnostic?.fullyUnverifiedProducts!==12)
             throw Error('181-target invariant failed; no API calls performed');
           report.targetCount=ids.length;
           report.snapshotVersion=d.schemaVersion;
           report.snapshotDate=d.updated;
           // Controls are outside the missing-stock target; use only to compare API semantics.
-          const controlIds=[3629,3634,6220].filter(id=>!ids.includes(id));
+          const controlIds=[11471,7792,3628].filter(id=>!ids.includes(id));
           report.controlIds=controlIds;
           save();
 
@@ -224,6 +224,64 @@ jobs:
             save();
           }
 
+
+          async function inspectFolderMembership() {
+            const targetRows=d.categories.flatMap(c=>c.items.flatMap(it=>
+              (it.flavors||[]).filter(f=>ids.includes(int(f.id)))
+                .map(f=>({id:int(f.id),name:String(f.name),folder:String(it.name),folderId:int(it.folderId)}))));
+            if(targetRows.length!==12||targetRows.some(x=>x.folderId===null)||
+               new Set(targetRows.map(x=>x.id)).size!==12)throw Error('Invalid folder metadata');
+            const folderIds=[...new Set(targetRows.map(x=>x.folderId))];
+            report.folderAudit={folders:folderIds,targetRows,scans:[],note:
+              'Read-only global and selected-store comparison; omitted rows or incomplete pages NEVER mean zero stock'};
+            const contexts=[{name:'Глобальный каталог',pointId:null},
+              ...stores.filter(s=>['ГУМ','Гаджиева','КТМ','Мир'].includes(s.name))];
+            for(const folderId of folderIds) {
+              const wanted=targetRows.filter(x=>x.folderId===folderId);
+              for(const context of contexts) {
+                let pageCount=0,rowsSeen=0,complete=false,reason=null;
+                const seen=new Map();
+                for(let page=0;page<8;page++) {
+                  const params={folder:folderId,page,pageSize:100,withBalance:context.pointId!==null};
+                  if(context.pointId!==null)params.pointId=context.pointId;
+                  let list,raw;
+                  try {
+                    raw=await get('v2/nomenclature/list',params,
+                      'folder '+folderId+' '+context.name+' page '+page);
+                    list=rows(raw,['nomenclatures'],['id']);
+                  }catch(e){reason=String(e.message).slice(0,90);break;}
+                  pageCount++;rowsSeen+=list.length;
+                  for(const item of list) {
+                    const id=int(item.id);
+                    if(wanted.some(x=>x.id===id)&&!item.isParent) {
+                      if(seen.has(id)){reason='Duplicate ID in folder';break;}
+                      seen.set(id,{id,name:String(item.name??''),published:item.published??null,
+                        balancePresent:Object.prototype.hasOwnProperty.call(item,'balance'),
+                        balance:number(item.balance),hierarchicalParent:item.hierarchicalParent??null});
+                    }
+                  }
+                  if(reason)break;
+                  if(raw?.outcome?.hasMore===false){complete=true;break;}
+                  if(raw?.outcome?.hasMore!==true||!list.length){reason='Uncertain pagination';break;}
+                }
+                const scan={folderId,context:context.name,rowsSeen,pageCount,complete,reason,
+                  items:wanted.map(x=>({id:x.id,found:seen.has(x.id),item:seen.get(x.id)??null}))};
+                if(reason)report.errors.push({scope:'folder',folderId,context:context.name,reason});
+                report.folderAudit.scans.push(scan);
+                console.log('Folder '+folderId+' '+context.name+': rows='+rowsSeen+
+                  ', exact='+seen.size+', complete='+complete);
+                save();
+              }
+            }
+            report.folderAudit.globalFound=report.folderAudit.scans
+              .filter(x=>x.context==='Глобальный каталог')
+              .reduce((n,x)=>n+x.items.filter(i=>i.found).length,0);
+            report.folderAudit.pointFound=report.folderAudit.scans
+              .filter(x=>x.context!=='Глобальный каталог')
+              .reduce((n,x)=>n+x.items.filter(i=>i.found).length,0);
+            save();
+          }
+
           async function main() {
             await login();
             const points=rows(await get('point/list',{product:'retail',pageSize:100,page:0},'sales points'),['salesPoints'],['id']);
@@ -260,7 +318,7 @@ jobs:
                 }
               }
               // Probe a few missing cells individually. A missing bulk row is NOT zero.
-              const toProbe=[3628,...ids].filter((id,i,a)=>a.indexOf(id)===i)
+              const toProbe=[...ids].filter((id,i,a)=>a.indexOf(id)===i)
                 .filter(id=>detail.get(id)?.status==='missing').slice(0,3);
               for(const id of toProbe) {
                 try {
@@ -281,12 +339,13 @@ jobs:
               save();
             }
             await extraReadOnlyChecks();
+            await inspectFolderMembership();
             report.completed=true;
             report.allRequestsSucceeded=report.errors.length===0;
             report.finishedAt=new Date().toISOString();
             report.totals={positive:0,zero:0,negative:0,missing:0,invalid:0,error:0};
             for(const s of report.stores)for(const [k,v] of Object.entries(s.counts))report.totals[k]+=v;
-            report.note='Live read-only API snapshot; Test 83 additionally cross-checks Saby company/warehouse mapping and v2 nomenclature/list on sample IDs. Missing rows never become zero. No data.json/index.html changes.';
+            report.note='Live read-only Test 85: check 12 completely unknown IDs by direct balance API and global/point-scoped folder membership. Missing rows never become zero. No data.json/index.html changes.';
             save();
             console.log('Total target cells: '+(ids.length*stores.length));
             console.log('Result totals: '+JSON.stringify(report.totals));
@@ -304,7 +363,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-83
-          path: diagnostic-83.json
+          name: diagnostic-85
+          path: diagnostic-85.json
           if-no-files-found: warn
           retention-days: 7
