@@ -32,6 +32,7 @@ jobs:
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
+          node <<'JS'
           'use strict';
           const fs=require('node:fs');
           const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -188,7 +189,7 @@ jobs:
             report.fatal=String(err.message).slice(0,100);report.finishedAt=new Date().toISOString();
             save();console.error('Diagnostic failure: '+report.fatal);process.exitCode=1;
           });
-          
+          JS
       - name: Upload diagnostic report even on failure
         if: always()
         uses: actions/upload-artifact@v4
