@@ -1,14 +1,14 @@
-name: Saby catalog synchronization preview 75
+name: Saby catalog synchronization preview 76
 on:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: saby-preview-75
+  group: saby-preview-76
   cancel-in-progress: false
 jobs:
   preview:
-    if: startsWith(github.ref, 'refs/heads/saby-preview-75-')
+    if: startsWith(github.ref, 'refs/heads/saby-preview-76-')
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -36,7 +36,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sync-preview-75
+          name: sync-preview-76
           path: |
             data.preview.json
             sync-preview-report.json

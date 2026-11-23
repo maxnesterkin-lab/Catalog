@@ -33,6 +33,7 @@ const u=new URL(path,BASE); for(const [k,v] of Object.entries(params)) if(Array.
 let relogged=false;
 for(let a=1;a<=4;a++){
 if(++requests>4000) throw Error('Request budget exceeded');
+if(requests%50===0) console.log(`API requests: ${requests}; phase=${path}`);
 await pause(2000);
 let r;
 try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===4) throw Error('Network/timeout'); await pause(1000*a);continue;}
@@ -84,7 +85,7 @@ for(const f of it.flavors){if(typeof f.name!=='string'||!Array.isArray(f.stores)
 return {items,flavors};
 }
 async function sync(api,prev,log=console.log,report={},save=()=>{}){
-const old=previousIndex(prev);report.complete=false;report.stock=[];report.missing=[];report.negative=[];report.invalid=[];report.priceIssues=[];report.excluded=[];report.preserved=0;report.unresolved=0;report.removed=[];
+const old=previousIndex(prev);report.complete=false;report.stock=[];report.missing=[];report.negative=[];report.invalid=[];report.priceIssues=[];report.excluded=[];report.preserved=0;report.unresolved=0;report.removed=[];report.duplicateNames=[];report.groupPriceIssues=[];report.statusCounts={available:0,zero:0,negative:0,missing:0,invalid:0};
 await api.login();
 const points=rows(await api.get('point/list',{product:'retail',pageSize:100,page:0}),['salesPoints'],['id']);
 const stores=STORE_ORDER.map((name,i)=>{const [pointId,warehouseId,companyId]=WAREHOUSES[i];const target=normalize(name);const matches=points.filter(p=>normalize(p.name)===target||(target==='гаджиева'&&normalize(p.name)==='гаджиево'));
@@ -104,7 +105,7 @@ const sub=await walk(hid,depth+1).catch(e=>{if(!e.folderContext){e.message+='; f
 } else {
 if(parent===null)throw Error('Root-level product requires catalog mapping');
 const id=key(x.id);if(ids.has(id))throw Error('Duplicate catalog product ID');ids.add(id);
-leaves.push({id,name,cost:numeric(x.cost),stock:Array(stores.length).fill(null)});
+leaves.push({id,name,cost:numeric(x.cost),stock:Array(stores.length).fill(null),previousAvailableStores:[],previousUnavailableStores:[]});
 }
 }
 return {children,leaves};
@@ -116,7 +117,9 @@ roots.forEach(r=>gather(r,r.name));
 if(!ids.size)throw Error('Empty global catalog');
 report.catalog={products:ids.size,folders:nodes.size};save();
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} leaf folders; ${stores.length} stores`);
-const currentKeys=new Map();for(const l of all)addUnique(currentKeys,composite(l.root,l.group,l.display),l.id);
+const currentKeys=new Map(), names=new Map();
+for(const l of all){const k=composite(l.root,l.group,l.display);addUnique(currentKeys,k,l.id);if(!names.has(k))names.set(k,[]);names.get(k).push(l.id);}
+for(const [k,ids] of names)if(ids.length>1)report.duplicateNames.push({path:JSON.parse(k),ids,resolution:'distinct IDs retained; manual review'});
 for(let si=0;si<stores.length;si++){
 const store=stores[si];const stats={store:store.name,positive:0,zero:0,negative:0,missing:0,invalid:0,batches:0};report.stock.push(stats);
 for(let i=0;i<all.length;i+=50){
@@ -124,13 +127,14 @@ const batch=all.slice(i,i+50);const mapped=await direct(api,store,batch);
 for(const l of batch){const b=mapped.get(l.id);const rec={store:store.name,id:l.id};
 if(!mapped.has(l.id)){stats.missing++;report.missing.push(rec);}
 else if(b===null){stats.invalid++;report.invalid.push(rec);}
-else if(b<0){stats.negative++;report.negative.push({...rec,value:b});l.stock[si]=false;continue;}
-else{if(b>0)stats.positive++;else stats.zero++;l.stock[si]=b>0;continue;}
+else if(b<0){stats.negative++;report.negative.push({...rec,value:b});l.stock[si]='negative';continue;}
+else{if(b>0)stats.positive++;else stats.zero++;l.stock[si]=b>0?'available':'zero';continue;}
+l.stock[si]=mapped.has(l.id)?'invalid':'missing';
 const k=composite(l.root,l.group,l.display);const v=old.flavors.get(k);
-if(currentKeys.get(k)===l.id&&v instanceof Set){l.stock[si]=v.has(store.name);report.preserved++;rec.resolution='previous';rec.previousAvailable=l.stock[si];}
+if(currentKeys.get(k)===l.id&&v instanceof Set){const wasAvailable=v.has(store.name);(wasAvailable?l.previousAvailableStores:l.previousUnavailableStores).push(si);report.preserved++;rec.resolution='previous hint only';rec.previousAvailable=wasAvailable;}
 else{report.unresolved++;rec.resolution='unknown';}
 }
-stats.batches++;if(stats.batches%10===0)save();
+stats.batches++;if(stats.batches%10===0||i+batch.length===all.length){log(`Stock ${store.name} (${si+1}/${stores.length}): ${i+batch.length}/${all.length} products (${Math.floor(100*(i+batch.length)/all.length)}%); batch ${stats.batches}/${Math.ceil(all.length/50)}; requests=${api.count()}`);save();}
 }
 if(stats.positive+stats.zero+stats.negative+stats.missing+stats.invalid!==all.length)throw Error('Incomplete stock coverage');
 log(`Stock ${store.name}: ${JSON.stringify(stats)}; requests=${api.count()}`);save();
@@ -141,12 +145,23 @@ const items=[];
 function collect(n){
 if(n.leaves.length){
 const leaves=n.leaves.slice().sort(byName);const prior=old.items.get(composite(root.name,n.name));
-const prices=leaves.map(l=>l.cost).filter(p=>p>0);const missing=leaves.filter(l=>!(l.cost>0));
-let price=prices.length?Math.min(...prices):null;
-if(missing.length){const p=numeric(prior?.price);if(p>0)price=p;for(const l of missing)report.priceIssues.push({id:l.id,group:n.name,resolution:p>0?'previous group price':price>0?'known group prices only':'group omitted in preview'});}
-if(price===null){n.children.slice().sort(byName).forEach(collect);return;}
-const flavors=leaves.map(l=>{const k=composite(root.name,n.name,l.display);emitted.add(k);return {name:l.display,stores:l.stock.flatMap((v,i)=>v===true?[i]:[])};});
-items.push({name:n.name,meta:prior?.meta??'',price,color:prior?.color??colorFor(n.name),flavors});total+=flavors.length;
+const prices=leaves.map(l=>l.cost).filter(p=>p>0), missing=leaves.filter(l=>!(l.cost>0));
+const minKnownPrice=prices.length?Math.min(...prices):null,maxKnownPrice=prices.length?Math.max(...prices):null;
+const priceStatus=missing.length?'unknown':minKnownPrice!==maxKnownPrice?'varies':'confirmed';
+const price=priceStatus==='confirmed'?minKnownPrice:null;
+for(const l of missing)report.priceIssues.push({id:l.id,group:n.name,product:l.name,rawPrice:l.cost,resolution:'unknown; no substitute price',previousGroupPrice:numeric(prior?.price)});
+if(priceStatus!=='confirmed')report.groupPriceIssues.push({category:root.name,group:n.name,folderId:n.hid,priceStatus,minKnownPrice,maxKnownPrice,missing:missing.length});
+const flavors=leaves.map(l=>{
+const k=composite(root.name,n.name,l.display);emitted.add(k);
+if(l.stock.some(v=>!Object.hasOwn(report.statusCounts,v)))throw Error('Invalid or missing stock status: '+l.id);
+for(const v of l.stock)report.statusCounts[v]++;
+return {id:l.id,name:l.display,price:l.cost>0?l.cost:null,priceStatus:l.cost>0?'confirmed':'unknown',
+stores:l.stock.flatMap((v,i)=>v==='available'?[i]:[]),
+stockStatus:l.stock,
+previousAvailableStores:l.previousAvailableStores,previousUnavailableStores:l.previousUnavailableStores,
+duplicateName:names.get(k).length>1};
+});
+items.push({folderId:n.hid,name:n.name,meta:prior?.meta??'',price,priceStatus,minKnownPrice,maxKnownPrice,color:prior?.color??colorFor(n.name),flavors});total+=flavors.length;
 }
 n.children.slice().sort(byName).forEach(collect);
 }
@@ -155,16 +170,21 @@ collect(root);if(items.length)categories.push({name:root.name,items});
 const oldCount=prev.categories.reduce((a,c)=>a+c.items.reduce((b,it)=>b+it.flavors.length,0),0);
 for(const [k] of old.flavors){const [root]=JSON.parse(k);if(!EXCLUDE_ROOTS.includes(normalize(root))&&!emitted.has(k))report.removed.push(JSON.parse(k));}
 report.result={categories:categories.length,positions:total,oldPositions:oldCount,requests:api.count(),publishBlocked:true};
-report.complete=true;save();
-if(!total)throw Error('Empty candidate catalog');
+if(!total||total!==ids.size)throw Error('Candidate lost catalog IDs');
+for(const [status,count] of Object.entries(report.statusCounts)){
+const field=status==='available'?'positive':status;
+if(count!==report.stock.reduce((sum,x)=>sum+x[field],0))throw Error('Stock count mismatch: '+status);
+}
+if(report.preserved+report.unresolved!==report.statusCounts.missing+report.statusCounts.invalid)throw Error('Unknown stock count mismatch');
+report.publishBlocked=true;report.complete=true;save();
 // Never publish in this revision: unresolved cells are omitted from the display-only preview,
 // prior-name matching is not an immutable ID match, and price/removal changes need review.
 log(`Result: ${categories.length} categories; ${total} positions; old positions=${oldCount}; requests=${api.count()}`);
-return {stores:stores.map(s=>s.name),categories};
+return {schemaVersion:76,previewOnly:true,stores:stores.map(s=>s.name),categories};
 }
 async function main(){
 if(process.env.SABY_PREVIEW!=='1')throw Error('Preview-only candidate; publication disabled');
-const started=Date.now(),report={version:'preview-75',started:new Date().toISOString(),complete:false,publishBlocked:true};
+const started=Date.now(),report={version:'preview-76',started:new Date().toISOString(),complete:false,publishBlocked:true};
 const save=()=>fs.writeFileSync('sync-preview-report.json',JSON.stringify(report));
 try{save();const prev=JSON.parse(fs.readFileSync('data.json','utf8'));const api=client(process.env);const content=await sync(api,prev,console.log,report,save);
 fs.writeFileSync('data.preview.json',JSON.stringify({updated:new Date().toISOString(),...content}));report.candidateWritten=true;report.elapsedSeconds=Math.round((Date.now()-started)/1000);save();}
