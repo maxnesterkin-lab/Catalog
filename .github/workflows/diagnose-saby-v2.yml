@@ -1,8 +1,8 @@
-name: Diagnose Saby API - Test 82
+name: Diagnose Saby API - Test 83
 on:
   push:
     branches:
-      - test-catalog-v82-20261123
+      - test-catalog-v83-20261123
     paths:
       - .github/workflows/diagnose-saby-v2.yml
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.ref == 'refs/heads/test-catalog-v82-20261123'
+    if: github.ref == 'refs/heads/test-catalog-v83-20261123'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -51,13 +51,13 @@ jobs:
             {name:'Североморск',pointId:18093,warehouseId:18095,companyId:17792},
           ];
           const report = {
-            test:82, branch:'test-catalog-v82-20261123',
+            test:83, branch:'test-catalog-v83-20261123',
             mode:'READ_ONLY_NO_PUBLISH', startedAt:new Date().toISOString(),
             source:'data.json schemaVersion=81; direct Saby balances API',
             requestCount:0, targetCount:0, stores:[], controls:[], errors:[],
             completed:false, allRequestsSucceeded:false
           };
-          const save = () => fs.writeFileSync('diagnostic-82.json', JSON.stringify(report,null,2));
+          const save = () => fs.writeFileSync('diagnostic-83.json', JSON.stringify(report,null,2));
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
           const norm = v => String(v??'').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
@@ -154,6 +154,76 @@ jobs:
             return n===null?{status:'invalid',balance:null}:
               {status:n>0?'positive':n===0?'zero':'negative',balance:n};
           }
+
+          // Test 83: verify warehouse/company configuration live and compare two
+          // READ-ONLY balance methods on representative IDs, never infer zero.
+          async function extraReadOnlyChecks() {
+            report.companyMappingChecks=[];
+            report.warehouseMappingChecks=[];
+            report.methodCrossChecks=[];
+            const wantedCompanies=[...new Set(stores.map(s=>s.companyId))];
+            try {
+              const raw=await get('company/list',{},'company list live mapping');
+              const list=rows(raw,['companies','companyList','data','result'],['id']);
+              const seen=new Set(list.map(x=>int(x.id??x.companyId)).filter(Boolean));
+              for(const id of wantedCompanies)
+                report.companyMappingChecks.push({companyId:id,present:seen.has(id),listLength:list.length});
+            } catch(e) {
+              report.companyMappingChecks.push({status:'not_verified',reason:String(e.message).slice(0,90)});
+            }
+            for(const companyId of wantedCompanies) {
+              try {
+                const raw=await get('company/warehouses',{companyId},'warehouse mapping company '+companyId);
+                const list=rows(raw,['warehouses','data','result'],['id']);
+                const seen=new Set(list.map(x=>int(x.id??x.warehouseId)).filter(Boolean));
+                for(const s of stores.filter(x=>x.companyId===companyId))
+                  report.warehouseMappingChecks.push({store:s.name,companyId,warehouseId:s.warehouseId,present:seen.has(s.warehouseId),listLength:list.length});
+              }catch(e) {
+                report.warehouseMappingChecks.push({companyId,status:'not_verified',reason:String(e.message).slice(0,90)});
+              }
+            }
+            // ID 11471 has a positive direct balance in Gadzhieva, ID 7792
+            // has a direct zero in KTM, and 14396 remains missing everywhere.
+            // A failed name search or absent listing is not a zero balance.
+            const samples=[
+              {id:11471,query:'N Silver x2 Strong'},
+              {id:7792,query:'Fujis'},
+              {id:3628,query:'VAPORESSO XROS 2ML 0.6'},
+              {id:14396,query:'Соур Бласт'}
+            ];
+            for(const store of stores.filter(s=>['Баумана','Гаджиева','КТМ','Крупской','Мир'].includes(s.name))) {
+              for(const sample of samples) {
+                const directItem=report.stores.find(x=>x.name===store.name)?.items.find(x=>x.id===sample.id);
+                const record={store:store.name,pointId:store.pointId,id:sample.id,
+                  directStatus:directItem?.status??null,directBalance:directItem?.balance??null};
+                try {
+                  const raw=await get('v2/nomenclature/list',{
+                    pointId:store.pointId,searchString:sample.query,withBalance:true,
+                    page:0,pageSize:100
+                  },'v2 list '+store.name+' ID '+sample.id);
+                  const list=rows(raw,['nomenclatures','items','data','result'],['id']);
+                  const exact=list.filter(x=>int(x.id)===sample.id && !x.isParent);
+                  record.returnedRows=list.length;
+                  record.exactMatches=exact.length;
+                  record.hasMore=raw?.outcome?.hasMore??null;
+                  record.listBalance=exact.length===1?number(exact[0].balance):null;
+                  record.listStatus=exact.length!==1?'id_not_returned_or_duplicate':
+                    record.listBalance===null?'balance_missing':record.listBalance>0?'positive':
+                    record.listBalance===0?'zero':'negative';
+                  record.agrees=record.listBalance!==null&&record.directBalance!==null?
+                    record.listBalance===record.directBalance:null;
+                } catch(e) {
+                  record.listStatus='not_verified';
+                  record.reason=String(e.message).slice(0,90);
+                }
+                report.methodCrossChecks.push(record);
+              }
+              save();
+            }
+            report.mappingFollowup='A missing row is not treated as zero. Cross-checks are samples, not full 181x11 coverage.';
+            save();
+          }
+
           async function main() {
             await login();
             const points=rows(await get('point/list',{product:'retail',pageSize:100,page:0},'sales points'),['salesPoints'],['id']);
@@ -210,12 +280,13 @@ jobs:
               console.log(store.name+': '+JSON.stringify(entry.counts)+'; requests failed '+entry.requestsFailed);
               save();
             }
+            await extraReadOnlyChecks();
             report.completed=true;
             report.allRequestsSucceeded=report.errors.length===0;
             report.finishedAt=new Date().toISOString();
             report.totals={positive:0,zero:0,negative:0,missing:0,invalid:0,error:0};
             for(const s of report.stores)for(const [k,v] of Object.entries(s.counts))report.totals[k]+=v;
-            report.note='This is a live read-only API snapshot, not the 23 Nov warehouse report. Absent or invalid balances are never converted to zero. No data.json/index.html changes.';
+            report.note='Live read-only API snapshot; Test 83 additionally cross-checks Saby company/warehouse mapping and v2 nomenclature/list on sample IDs. Missing rows never become zero. No data.json/index.html changes.';
             save();
             console.log('Total target cells: '+(ids.length*stores.length));
             console.log('Result totals: '+JSON.stringify(report.totals));
@@ -233,7 +304,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-82
-          path: diagnostic-82.json
+          name: diagnostic-83
+          path: diagnostic-83.json
           if-no-files-found: warn
           retention-days: 7
