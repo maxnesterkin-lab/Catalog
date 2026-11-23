@@ -6,8 +6,7 @@
 <title>SEVERVAPE — каталог</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--tx);font:400 16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
@@ -39,157 +38,134 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 .price{font:800 18px Impact,"Arial Black",sans-serif;margin-top:6px}
 .tag{font:600 11px system-ui,sans-serif;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:8px;vertical-align:middle}
 .av{margin-top:6px;font-size:14px;font-weight:600}
-.av.ok{color:var(--ok)}.av.no{color:var(--no)}
+.av.ok{color:var(--ok)}.av.no{color:var(--no)}.av.unknown{color:var(--warn)}
 .detail{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
 .fl{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:15px}
+.fl .right{text-align:right;flex:0 0 auto;max-width:47%}
+.fl .right .price{font:700 14px system-ui,sans-serif}
 .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
 .sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:14px}
 .sheet button.on{color:var(--tx);font-weight:700}
 .err{color:var(--warn)}
 .demo{font-size:12px;color:var(--mut);text-align:center;margin-top:24px}
 .empty{color:var(--mut);text-align:center;padding:40px 0}
+.preview-banner{border:1px solid var(--warn);border-radius:10px;background:#302515;color:#ffcf89;padding:10px 12px;font-size:13px;text-align:center;margin-bottom:12px}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
-// ---------- Telegram Mini App ----------
+// Тестовая версия интерфейса каталога №76. Не публиковать без полной проверки.
 const tg = window.Telegram && window.Telegram.WebApp;
-try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor("#0a0b10"); tg.setBackgroundColor("#0a0b10"); } } catch (e) {}
-
-const LS = {
-  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-};
-const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0b10'); tg.setBackgroundColor('#0a0b10'); } } catch(e) {}
+const LS = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
-
-// ---------- Состояние ----------
-// D — данные из data.json (их обновляет update-script.js из Saby):
-// { updated, stores: ["Баумана", ...], categories: [{ name, items: [{ name, meta, price, color, flavors: [{ name, stores: [индексы магазинов] }] }] }] }
-let D = { stores: [], categories: [], updated: "", addr: {} };
-let S = { step: LS.get("age18") === "1" ? "stores" : "gate", tab: "catalog", store: null, cat: null, q: "", open: null, status: "loading" };
-const BACK = { cats: "stores", list: "cats" };
-
-function normalize(d) {
-  const stores = (d.stores || []).map(s => typeof s === "string" ? { name: s } : { name: s.name, hours: s.hours });
-  const categories = Array.isArray(d.categories) ? d.categories : [];
-  return {
-    stores,
-    updated: d.updated || "",
-    addr: d.addr || {},
-    categories: categories.map(c => ({
-      name: c.name || "",
-      items: (c.items || []).map(it => ({
-        name: it.name || "", meta: it.meta || "", price: Number(it.price) || 0, color: it.color || "#9fd8ff",
-        flavors: (it.flavors || []).map(f => ({ name: f.name || "", stores: Array.isArray(f.stores) ? f.stores : [] }))
-      }))
+const validStatus = new Set(['available','zero','missing','negative']);
+const validPrice = x => Number.isFinite(Number(x)) && x !== null && String(x).trim()!=='' && Number(x)>0;
+let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
+let S = {step:LS.get('age18')==='1'?'stores':'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
+const BACK={cats:'stores',list:'cats'};
+function normalize(d){
+  if(!d || !Array.isArray(d.stores)||!Array.isArray(d.categories)) throw Error('Некорректный каталог');
+  const stores=d.stores.map(s=>typeof s==='string'?{name:s}:{name:String(s.name||''),hours:s.hours});
+  const categories=d.categories.map(c=>({name:String(c.name||''),items:(c.items||[]).map(it=>({
+    name:String(it.name||''),meta:it.meta||'',price:validPrice(it.price)?Number(it.price):null,
+    minKnownPrice:validPrice(it.minKnownPrice)?Number(it.minKnownPrice):null,
+    maxKnownPrice:validPrice(it.maxKnownPrice)?Number(it.maxKnownPrice):null,
+    color:it.color||'#9fd8ff',
+    flavors:(it.flavors||[]).map(f=>({
+      id:f.id==null?null:String(f.id),name:String(f.name||''),price:validPrice(f.price)?Number(f.price):null,
+      priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
+      stockStatus:stores.map((_,i)=>{
+        const raw=Array.isArray(f.stockStatus)?f.stockStatus[i]:null;
+        if(validStatus.has(raw))return raw;
+        // В старой схеме отсутствие магазина в stores НЕ доказывает нулевой остаток.
+        return (Array.isArray(f.stores)&&f.stores.includes(i))?'available':'missing';
+      })
     }))
-  };
+  }))}));
+  return {stores,categories,updated:d.updated||'',addr:d.addr||{},previewOnly:!!d.previewOnly};
 }
-
-function load() {
-  S.status = "loading"; render();
-  fetch("data.json", { cache: "no-store" })
-    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then(data => {
-      D = normalize(data);
-      const saved = parseInt(LS.get("store"), 10);
-      if (S.store === null && saved >= 0 && saved < D.stores.length) S.store = saved;
-      if (S.step === "stores" && S.store !== null) S.step = "cats";
-      S.status = "ok"; render();
-    })
-    .catch(e => { console.error("Ошибка загрузки данных:", e); S.status = "error"; render(); });
+function load(){
+  S.status='loading';render();
+  const embedded=$('embedded-catalog');
+  const dataPromise=embedded ? Promise.resolve().then(()=>JSON.parse(embedded.textContent)) : fetch('data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
+  dataPromise.then(data=>{D=normalize(data);const saved=parseInt(LS.get('store'),10);if(S.store===null&&Number.isInteger(saved)&&saved>=0&&saved<D.stores.length)S.store=saved;if(S.step==='stores'&&S.store!==null)S.step='cats';S.status='ok';render();})
+    .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
-
-// ---------- Навигация ----------
-function go(step) {
-  S.step = step; S.open = null;
-  if (step === "cats") S.q = "";
-  render(); window.scrollTo(0, 0);
+function go(step){S.step=step;S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
+function pickStore(i){S.store=i;S.tab='catalog';LS.set('store',i);go('cats')}
+function pickCat(i){S.cat=i;go('list')}
+function toggleItem(i){S.open=S.open===i?null:i;renderList()}
+function adult(){LS.set('age18','1');go(S.store===null?'stores':'cats')}
+try{if(tg&&tg.BackButton)tg.BackButton.onClick(()=>{if(BACK[S.step])go(BACK[S.step])})}catch(e){}
+function syncBack(){try{if(tg&&tg.BackButton){if(BACK[S.step]&&S.status==='ok')tg.BackButton.show();else tg.BackButton.hide()}}catch(e){}}
+function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">←</button>`:''}<h2>${esc(title)}</h2></div>`}
+function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`}
+function fmtDate(iso){try{return new Date(iso).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' (МСК)'}catch(e){return iso}}
+function foot(){return `<p class="demo">${D.updated?'Данные обновлены: '+esc(fmtDate(D.updated))+'. Наличие уточняйте в магазине.':'Концепт · цены и наличие — демо-данные'}</p>`}
+function getStatus(f,si){return f.stockStatus[si]||'missing'}
+function avail(s){return s==='available'?['Есть здесь','ok']:s==='zero'?['Нет здесь','no']:s==='negative'?['Уточнить остаток','unknown']:['Нет данных','unknown']}
+function money(x){return Number(x).toLocaleString('ru-RU')+' ₽'}
+function itemPrice(p){
+  const nums=p.flavors.map(f=>f.price||p.price).filter(validPrice);
+  if(!nums.length)return 'Цена уточняется';
+  const lo=Math.min(...nums),hi=Math.max(...nums);
+  return lo===hi?money(lo):'от '+money(lo)+' до '+money(hi);
 }
-function pickStore(i) { S.store = i; S.tab = "catalog"; LS.set("store", i); go("cats"); }
-function pickCat(i) { S.cat = i; go("list"); }
-function toggleItem(i) { S.open = S.open === i ? null : i; renderList(); }
-function adult() { LS.set("age18", "1"); go(S.store === null ? "stores" : "cats"); }
-
-try { if (tg && tg.BackButton) tg.BackButton.onClick(() => { if (BACK[S.step]) go(BACK[S.step]); }); } catch (e) {}
-function syncBack() {
-  try { if (tg && tg.BackButton) { if (BACK[S.step] && S.status === "ok") tg.BackButton.show(); else tg.BackButton.hide(); } } catch (e) {}
-}
-
-// ---------- Отрисовка ----------
-function bar(backStep, title) {
-  return `<div class="top">${backStep ? `<button class="back" aria-label="Назад" onclick="go('${backStep}')">←</button>` : ""}<h2>${esc(title)}</h2></div>`;
-}
-function nav() {
-  return `<nav class="sheet"><button class="${S.tab === "catalog" ? "on" : ""}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab === "stores" ? "on" : ""}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`;
-}
-function fmtDate(iso) {
-  try { return new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " (МСК)"; }
-  catch (e) { return iso; }
-}
-function foot() {
-  return `<p class="demo">${D.updated ? "Данные обновлены: " + esc(fmtDate(D.updated)) + ". Наличие уточняйте в магазине." : "Концепт · цены и наличие — демо-данные"}</p>`;
-}
-
-function render() {
-  let h = "";
-  if (S.step === "gate") {
-    h = `<div class="gate"><h1>SEVERVAPE</h1><div class="sub">СЕТЬ МАГАЗИНОВ</div><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="adult()">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
-    $("app").innerHTML = h; syncBack(); return;
+function render(){
+  let h='';
+  if(S.step==='gate'){
+    h=`<div class="gate"><h1>SEVERVAPE</h1><div class="sub">СЕТЬ МАГАЗИНОВ</div><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="adult()">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+    $('app').innerHTML=h;syncBack();return;
   }
-  if (S.status === "loading") {
-    $("app").innerHTML = `<div class="empty">Загрузка каталога…</div>`; syncBack(); return;
+  if(S.status==='loading'){$('app').innerHTML='<div class="empty">Загрузка каталога…</div>';syncBack();return}
+  if(S.status==='error'){$('app').innerHTML='<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>';syncBack();return}
+  if(S.step!=='stores'&&S.store===null)S.step='stores';
+  if(S.step==='list'&&!D.categories[S.cat])S.step='cats';
+  const banner=D.previewOnly?'<div class="preview-banner">ПРЕДВАРИТЕЛЬНЫЙ КАТАЛОГ — НЕ ДЛЯ ПУБЛИКАЦИИ</div>':'';
+  if(S.step==='stores'){
+    h=bar(null,'Магазины')+(D.stores.length?D.stores.map((s,i)=>{
+      const sub=[s.hours,D.addr[s.name]].filter(Boolean).join(' · ');
+      return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store===i?' <span class="tag">выбран</span>':''}</b>${sub?`<small>${esc(sub)}</small>`:''}</button>`;
+    }).join(''):'<div class="empty">Список магазинов пуст.</div>');
+  }else if(S.step==='cats'){
+    h=bar('stores',D.stores[S.store].name)+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} групп</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>';
+  }else if(S.step==='list'){
+    h=bar('cats',D.categories[S.cat].name)+`<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
   }
-  if (S.status === "error") {
-    $("app").innerHTML = `<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>`; syncBack(); return;
-  }
-  if (S.step !== "stores" && S.store === null) S.step = "stores";
-  if (S.step === "list" && !D.categories[S.cat]) S.step = "cats";
-
-  if (S.step === "stores") {
-    h = bar(null, "Магазины") + (D.stores.length ? D.stores.map((s, i) => {
-      const sub = [s.hours, D.addr[s.name]].filter(Boolean).join(" · ");
-      return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store === i ? ' <span class="tag">выбран</span>' : ""}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
-    }).join("") : `<div class="empty">Список магазинов пуст.</div>`);
-  } else if (S.step === "cats") {
-    h = bar("stores", D.stores[S.store].name) + (D.categories.length
-      ? `<div class="cats">${D.categories.map((c, i) => `<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} поз.</span></button>`).join("")}</div>`
-      : `<div class="empty">Каталог пока пуст.</div>`)
-      + `<button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
-  } else if (S.step === "list") {
-    h = bar("cats", D.categories[S.cat].name) + `<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
-  }
-  $("app").innerHTML = h + nav() + foot();
-  if (S.step === "list") renderList();
-  syncBack();
+  $('app').innerHTML=banner+h+nav()+foot();if(S.step==='list')renderList();syncBack();
 }
-
-function renderList() {
-  const cat = D.categories[S.cat], q = S.q.trim().toLowerCase(), out = [];
-  cat.items.forEach((p, i) => {
-    const all = p.flavors.map((f, fi) => ({ f, fi, here: f.stores.includes(S.store) }));
-    const nameHit = p.name.toLowerCase().includes(q);
-    const fHit = q ? all.filter(x => x.f.name.toLowerCase().includes(q)) : all;
-    if (q && !nameHit && !fHit.length) return;
-    const rows = (q && !nameHit) ? fHit : all;
-    const n = all.filter(x => x.here).length;
-    const opened = S.open === i || (q && !nameHit);
-    const label = n ? `В наличии здесь: ${n} из ${all.length} вкусов` : "Нет в наличии здесь";
-    let body = `<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>`;
-    if (opened) {
-      body = '<div class="detail">' + rows.slice().sort((a, b) => b.here - a.here).map(({ f, here }) => {
-        const others = D.stores.map((s, si) => si).filter(si => si !== S.store && f.stores.includes(si)).map(si => D.stores[si].name);
-        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${others.length ? "Есть ещё: " + esc(others.join(", ")) : "В других магазинах нет"}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${here ? "Есть здесь" : "Нет здесь"}</span></div>`;
-      }).join("") + "</div>";
+function renderList(){
+  const cat=D.categories[S.cat],q=S.q.trim().toLowerCase(),out=[];
+  cat.items.forEach((p,i)=>{
+    const all=p.flavors.map((f,fi)=>({f,fi,status:getStatus(f,S.store)}));
+    const nameHit=p.name.toLowerCase().includes(q);
+    const filtered=q?all.filter(x=>x.f.name.toLowerCase().includes(q)):all;
+    if(q&&!nameHit&&!filtered.length)return;
+    const rows=q&&!nameHit?filtered:all;
+    const n=all.filter(x=>x.status==='available').length;
+    const uncertain=all.filter(x=>x.status==='missing'||x.status==='negative').length;
+    const opened=S.open===i||(q&&!nameHit);
+    const label=n?`В наличии здесь: ${n} из ${all.length}`:uncertain?'Наличие уточняется':'Нет в наличии здесь';
+    const summaryClass=n?'ok':uncertain?'unknown':'no';
+    let body='<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>';
+    if(opened){
+      body='<div class="detail">'+rows.slice().sort((a,b)=>Number(b.status==='available')-Number(a.status==='available')).map(({f,status})=>{
+        const others=D.stores.map((s,si)=>si).filter(si=>si!==S.store&&getStatus(f,si)==='available').map(si=>D.stores[si].name);
+        const unknownElse=D.stores.some((s,si)=>si!==S.store&&['missing','negative'].includes(getStatus(f,si)));
+        const [text,cls]=avail(status);
+        const pprice=validPrice(f.price)?money(f.price):(validPrice(p.price)?money(p.price):'Цена уточняется');
+        const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
+        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${others.length?'Есть ещё: '+esc(others.join(', ')):unknownElse?'В других магазинах данные неполные':'В других магазинах нет'}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
+      }).join('')+'</div>';
     }
-    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(" ")[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta ? `<div class="meta">${esc(p.meta)}</div>` : ""}${p.price ? `<div class="price">${p.price} ₽</div>` : ""}<div class="av ${n ? "ok" : "no"}">${label}</div></div></div>${body}</button>`);
+    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(' ')[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta?`<div class="meta">${esc(p.meta)}</div>`:''}<div class="price">${esc(itemPrice(p))}</div><div class="av ${summaryClass}">${label}</div></div></div>${body}</button>`);
   });
-  $("list").innerHTML = out.length ? out.join("") : `<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+  $('list').innerHTML=out.length?out.join(''):'<div class="empty">Ничего не найдено. Измените запрос.</div>';
 }
-
-render();
-load();
-</script></body>
+render();load();
+</script>
+</body>
 </html>
