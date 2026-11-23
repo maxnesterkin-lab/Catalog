@@ -1,5 +1,10 @@
 name: Diagnose Saby API - Test 82
 on:
+  push:
+    branches:
+      - test-catalog-v82-20261123
+    paths:
+      - .github/workflows/diagnose-saby-v2.yml
   workflow_dispatch:
 
 permissions:
