@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>SEVERVAPE — тестовый каталог №78</title>
+<title>SEVERVAPE — тестовый каталог №79</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -125,7 +125,7 @@ function render(){
   if(S.status==='error'){$('app').innerHTML='<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>';syncBack();return}
   if(S.step!=='stores'&&S.store===null)S.step='stores';
   if(S.step==='list'&&!D.categories[S.cat])S.step='cats';
-  const banner=D.previewOnly?'<div class="preview-banner">ТЕСТ №78: остатки из отчёта Saby за 23.11.2026 · не онлайн · 227 неподтверждённых вариантов скрыты</div>':'';
+  const banner=D.previewOnly?'<div class="preview-banner">ТЕСТ №79: остатки из отчёта Saby за 23.11.2026 · не онлайн · 227 неподтверждённых вариантов скрыты</div>':'';
   if(S.step==='stores'){
     h=bar(null,'Магазины')+(D.stores.length?D.stores.map((s,i)=>{
       const sub=[s.hours,D.addr[s.name]].filter(Boolean).join(' · ');
@@ -166,6 +166,196 @@ function renderList(){
   });
   $('list').innerHTML=out.length?out.join(''):'<div class="empty">Ничего не найдено. Измените запрос.</div>';
 }
+</script>
+<script>
+/* SeverVape v79: navigation by manufacturer -> model -> cartridge/coil.
+   Inventory records, ids, prices and stock statuses are NOT rewritten. */
+(function () {
+'use strict';
+const SOURCE_NAME = 'Комплектующие для систем';
+const PARTS_NAME = 'Картриджи и испарители';
+const EXTRAS_NAME = 'Адаптеры и атомайзеры';
+const BRAND_ORDER = ['VAPORESSO','PLONQ','GEEKVAPE','VOOPOO','SMOANT','SMOK','ASPIRE / BRUSKO','OXVA','LOST VAPE','RINCOE','FOOSE','NEVOKS','JUSTFOG','VANZA','SUORIN','UWELL','WISMEC','VIVA LA CLOUD','HOTCIG','GEN AIR'];
+const BRANDS = [
+ ['VAPORESSO',/\bVAPORESSO\b/],['PLONQ',/\bPLONQ\b/],['GEEKVAPE',/\bGEEKVAPE\b/],
+ ['VOOPOO',/\bVOOPOO\b/],['SMOANT',/\bSMOANT\b/],['SMOK',/\bSMOK\b/],
+ ['ASPIRE / BRUSKO',/\bASPIRE\b|\bBRUSKO\b/],['OXVA',/\bOXVA\b/],
+ ['LOST VAPE',/\bLOST\s+VAPE\b/],['RINCOE',/\bRINCOE\b/],['FOOSE',/\bFOOSE\b/],
+ ['NEVOKS',/\bNEVOKS\b/],['JUSTFOG',/\bJUSTFOG\b/],['VANZA',/\bVANZA\b/],
+ ['SUORIN',/\bSUORIN\b/],['UWELL',/\bUWELL\b/],['WISMEC',/\bWISMEC\b/],
+ ['VIVA LA CLOUD',/VIVA\s+LA\s+CLOUD/],['HOTCIG',/\bHOTCIG\b/],['GEN AIR',/\bGEN\s+AIR\b/]
+];
+const SERIES = {
+ 'VAPORESSO':[
+ ['XROS',/\bXROS\b/],['LUXE X / XR',/\bLUXE\s+X(R)?\b/],['LUXE Q',/\bLUXE\s+Q\b/],
+ ['LUXE PM40',/\bLUXE\s+PM40\b/],['ECO NANO',/\bECO\s+NANO\b/],['VIBE',/\bVIBE\b/],
+ ['APEX',/\bAPEX\b/],['ARMOUR',/\bARMOUR\b/],['GTX',/\bGTX\b/],
+ ['GT',/\bGT\b|\bGT2\b|\bGT4\b/],['XTRA',/\bXTRA\b/],['ZERO',/\bZERO\b/],
+ ['OSMALL',/\bOSMALL\b/],['SWAG',/\bSWAG\b/],['TARGET',/\bTARGET\b/],
+ ['BARR',/\bBARR\b/],['XTANK',/\bXTANK\b/]
+ ],
+ 'PLONQ':[['META',/\bMETA\b/]],
+ 'GEEKVAPE':[
+ ['AEGIS BOOST',/\bAEGIS\s+BOOST\b/],['AEGIS HERO',/\bHERO\b/],
+ ['H45',/\bH45\b/],['AP2',/\bAP2\b/],['WENAX',/\bWENAX\b/],
+ ['Q',/\bQ\b/],['B',/\bB\b/],['G',/\bG\b/],['P',/\bP\b/],
+ ['N',/\bN\b/],['ONE',/\bONE\b/],['U',/\bU\b/]
+ ],
+ 'VOOPOO':[
+ ['ARGUS',/\bARGUS\b/],['VMATE',/\bVMATE\b/],['PNP X',/\bPNP\s+X\b/],
+ ['PNP',/\bPNP\b/],['ITO',/\bITO\b/],['VINCI',/\bVINCI\b/],
+ ['DRAG NANO',/\bDRAG\s+NANO\b/],['TPP',/\bTPP\b/],['POD-S1',/\bPOD-S1\b/]
+ ],
+ 'SMOANT':[
+ ['PASITO',/\bPASITO\b/],['KNIGHT',/\bKNIGHT\b/],['LEVIN',/\bLEVIN\b/],
+ ['BATTLESTAR / CHARON BABY',/\bBATTLESTAR\b|\bCHARON\s+BABY\b/],
+ ['SANTI / S-COIL',/\bSANTI\b|\bS-COIL\b/],['K SERIES',/\bK-[1-4]\b|\bSMOANT\s+K\b/],
+ ['VEER',/\bVEER\b/],['VIKII',/\bVIKII\b/],['BABY LF',/\bBABY\s+LF\b/]
+ ],
+ 'SMOK':[['NOVO',/\bNOVO\b/],['NORD',/\bNORD\b/],['RPM',/\bRPM\b/],
+         ['LP1',/\bLP1\b/],['SOLUS',/\bSOLUS\b/]],
+ 'ASPIRE / BRUSKO':[
+ ['MINICAN',/\bMINICAN\b/],['FLEXUS',/\bFLEXUS\b/],['FAVOSTIX',/\bFAVOSTIX\b/],
+ ['VILTER',/\bVILTER\b/],['DABBLER',/\bDABBLER\b/],['FURY',/\bFURY\b/]
+ ],
+ 'OXVA':[['XLIM',/\bXLIM\b/],['ORIGIN X',/\bORIGIN\s+X\b/]],
+ 'LOST VAPE':[['UB',/\bUB\b|ULTRA\s+BOOST/]],
+ 'RINCOE':[['JELLYBOX',/\bJELLYBOX\b/],['MANTO AIO',/\bMANTO\s+AIO\b/]],
+ 'FOOSE':[['RIZZ',/\bRIZZ\b/]],
+ 'NEVOKS':[['FEELIN MINI',/\bFEELIN\b/],['SPL 10',/\bSPL\s+10\b/]],
+ 'JUSTFOG':[['MINIFIT',/\bMINIFIT\b/],['C601',/\bC601\b/]],
+ 'VANZA':[['NANO BUN',/\bNANO\s+BUN\b/]],
+ 'SUORIN':[['EDGE',/\bEDGE\b/]],
+ 'WISMEC':[['R40 / R80',/\bR40\b|\bR80\b/]],
+ 'VIVA LA CLOUD':[['V-CAPS',/\bV-CAPS\b/]],
+ 'HOTCIG':[['KUBI PLUS',/\bKUBI\s+PLUS\b/]],
+ 'GEN AIR':[['GEN AIR',/\bGEN\s+AIR\b/]]
+};
+const priority = b => { const i=BRAND_ORDER.indexOf(b); return i===-1?1000:i; };
+const modelSort = brand => (a,b) => {
+ const ranking=SERIES[brand]||[];
+ const index=m=>m==='Другие модели'?1000:ranking.findIndex(x=>x[0]===m);
+ const ra=index(a),rb=index(b);
+ return (ra<0?999:ra)-(rb<0?999:rb)||a.localeCompare(b,'ru');
+};
+const oldNormalize=normalize;
+normalize=function(input){
+ const d=oldNormalize(input);
+ const idx=d.categories.findIndex(c=>c.name===SOURCE_NAME);
+ if(idx>=0){
+  const cat=d.categories[idx];
+  const extras=cat.items.filter(p=>/^(Адаптеры и аккумуляторы|Атомайзеры)$/i.test(p.name));
+  cat.items=cat.items.filter(p=>!extras.includes(p));
+  cat.name=PARTS_NAME;
+  if(extras.length)d.categories.splice(idx+1,0,{name:EXTRAS_NAME,items:extras});
+ }
+ // In the devices section, keep original AEGIS grouping, but put leading brands first.
+ const devices=d.categories.find(c=>c.name==='Системы и устройства');
+ if(devices)devices.items.sort((a,b)=>{
+   const A=(a.name.split('—')[0]||'').trim(),B=(b.name.split('—')[0]||'').trim();
+   const pa=priority(A==='ASPIRE / BRUSKO'?'ASPIRE / BRUSKO':A),pb=priority(B==='ASPIRE / BRUSKO'?'ASPIRE / BRUSKO':B);
+   return pa-pb || a.name.localeCompare(b.name,'ru');
+ });
+ return d;
+};
+const oldPickCat=pickCat;
+pickCat=function(i){
+ if(D.categories[i]?.name===PARTS_NAME){S.cat=i; S.partsBrand=null;S.partsModel=null;go('partsBrands');}
+ else oldPickCat(i);
+};
+BACK.partsBrands='cats';BACK.partsModels='partsBrands';BACK.partsItems='partsModels';
+function partRows(){
+ const cat=D.categories.find(c=>c.name===PARTS_NAME);
+ if(!cat)return [];
+ const records=[];
+ cat.items.forEach(group=>group.flavors.forEach(f=>{
+  const t=(f.name+' '+group.name).toUpperCase();
+  const b=BRANDS.find(([_,pat])=>pat.test(t));
+  const brand=b?b[0]:'ДРУГИЕ ПРОИЗВОДИТЕЛИ';
+  const match=(SERIES[brand]||[]).find(([_,pat])=>pat.test(t));
+  const model=match?match[0]:'Другие модели';
+  records.push({group,f,brand,model});
+ }));
+ return records;
+}
+const oldRender=render;
+render=function(){
+ if(!['partsBrands','partsModels','partsItems'].includes(S.step)){oldRender();return;}
+ if(S.status!=='ok'){oldRender();return;}
+ const all=partRows(),countHere=rows=>rows.filter(x=>getStatus(x.f,S.store)==='available').length;
+ const element=(txt,meta,click)=>`<button class="card parts-folder" onclick="${click}"><b>${esc(txt)}</b><span class="meta">${esc(meta)}</span><span aria-hidden="true" class="parts-chevron">›</span></button>`;
+ let html='';
+ if(S.step==='partsBrands'){
+   html=bar('cats',PARTS_NAME)+'<p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>';
+   const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>priority(a)-priority(b)||a.localeCompare(b,'ru'));
+   html+=brands.map((b,i)=>{
+    const rows=all.filter(x=>x.brand===b),models=new Set(rows.map(x=>x.model)).size;
+    return element(b,`${models} серий · ${countHere(rows)} позиций в наличии здесь`,`openPartsBrand(${i})`);
+   }).join('');
+ }else if(S.step==='partsModels'){
+   html=bar('partsBrands',S.partsBrand)+'<p class="meta parts-intro">Выберите серию. Совместимость с конкретной версией устройства уточняйте у консультанта.</p>';
+   const rows=all.filter(x=>x.brand===S.partsBrand);
+   const models=[...new Set(rows.map(x=>x.model))].sort(modelSort(S.partsBrand));
+   html+=models.map((m,i)=>{
+    const group=rows.filter(x=>x.model===m);
+    return element(m,`${group.length} позиций · ${countHere(group)} в наличии здесь`,`openPartsModel(${i})`);
+   }).join('');
+ }else{
+   const rows=all.filter(x=>x.brand===S.partsBrand&&x.model===S.partsModel);
+   html=bar('partsModels',S.partsModel)+`<p class="meta parts-intro">${esc(S.partsBrand)} · ${rows.length} позиций. Количество означает разновидности, не штуки на складе.</p>`;
+   html+=rows.sort((a,b)=>{
+    const ca=getStatus(a.f,S.store)==='available'?0:1,cb=getStatus(b.f,S.store)==='available'?0:1;
+    return ca-cb||a.f.name.localeCompare(b.f.name,'ru');
+   }).map(({f,group})=>{
+     const status=getStatus(f,S.store),[label,cls]=avail(status);
+     const others=D.stores.map((x,i)=>i).filter(i=>i!==S.store&&getStatus(f,i)==='available').map(i=>D.stores[i].name);
+     const price=validPrice(f.price)?money(f.price):(validPrice(group.price)?money(group.price):'Цена уточняется');
+     const stockText=others.length?'Есть ещё: '+others.join(', '):'В других магазинах наличие не подтверждено';
+     return `<div class="card"><div class="parts-product"><div><b>${esc(f.name)}</b><div class="meta">${esc(group.name)}</div><div class="av ${cls}">${esc(label)}</div><div class="meta">${esc(stockText)}</div></div><div class="price">${esc(price)}</div></div></div>`;
+   }).join('')||'<div class="empty">В этой серии пока нет позиций.</div>';
+ }
+ const banner=D.previewOnly?'<div class="preview-banner">Тестовая версия · не для покупателей · остатки из выгрузки Saby</div>':'';
+ $('app').innerHTML=banner+html+nav()+foot();syncBack();
+};
+window.openPartsBrand=function(i){
+ const brands=[...new Set(partRows().map(x=>x.brand))].sort((a,b)=>priority(a)-priority(b)||a.localeCompare(b,'ru'));
+ S.partsBrand=brands[i];S.partsModel=null;go('partsModels');
+};
+window.openPartsModel=function(i){
+ const rows=partRows().filter(x=>x.brand===S.partsBrand);
+ const models=[...new Set(rows.map(x=>x.model))].sort(modelSort(S.partsBrand));
+ S.partsModel=models[i];go('partsItems');
+};
+window.openPartsForDevice=function(brand){
+ const row=partRows().find(x=>x.brand===brand);if(!row)return;
+ S.cat=D.categories.findIndex(c=>c.name===PARTS_NAME);
+ S.partsBrand=brand;S.partsModel=null;go('partsModels');
+};
+const oldRenderList=renderList;
+renderList=function(){
+ oldRenderList();
+ if(S.step!=='list'||D.categories[S.cat]?.name!=='Системы и устройства')return;
+ const cards=Array.from($('list').querySelectorAll('.card'));
+ const products=D.categories[S.cat].items;
+ // The base list skips products during text search, so identify cards by rendered product name.
+ for(const card of cards){
+   const h=card.querySelector('h3'); if(!h)continue;
+   const p=products.find(x=>x.name===h.textContent);if(!p)continue;
+   const pi=products.indexOf(p);
+   if(S.open!==pi && !(S.q && !p.name.toLowerCase().includes(S.q.toLowerCase())))continue;
+   const brand=p.name.split('—')[0].trim();
+   if(!partRows().some(x=>x.brand===brand))continue;
+   const btn=document.createElement('button');btn.className='parts-go';btn.type='button';
+   btn.textContent='Картриджи и испарители '+brand+' →';
+   btn.onclick=()=>openPartsForDevice(brand);
+   card.insertAdjacentElement('afterend',btn);
+ }
+};
+const css=document.createElement('style');
+css.textContent=`.parts-folder{position:relative;padding-right:34px}.parts-folder b{display:block;font-size:17px;margin-bottom:4px}.parts-folder .meta{display:block;font-size:13px}.parts-chevron{position:absolute;right:14px;top:15px;font-size:23px;color:var(--sh)}.parts-intro{margin:0 0 17px}.parts-product{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.parts-product>div:first-child{min-width:0;flex:1}.parts-product>.price{flex:0 0 auto;font-size:16px;white-space:nowrap}.parts-go{width:100%;margin:-6px 0 18px;padding:9px 12px;background:transparent;border:1px solid var(--ac);border-radius:10px;color:var(--sh);font-size:13px;text-align:center}`;
+document.head.appendChild(css);
+})();
+
 render();load();
 </script>
 </body>
