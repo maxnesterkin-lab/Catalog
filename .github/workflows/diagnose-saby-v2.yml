@@ -1,4 +1,4 @@
-name: Diagnose Saby API - XROS Bauman
+name: Diagnose Saby API - NUM folder
 on:
   push:
     branches:
@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Read XROS balances for Bauman warehouse
+      - name: Compare NUM catalog and store requests
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
@@ -32,10 +32,6 @@ jobs:
           const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
           const API = 'https://api.sbis.ru/retail/';
           const store = {name:'Баумана',pointId:14401,warehouseId:14403,companyId:249};
-          const cases = [
-            {id:14391,label:'XROS 5 Kit Brown Leather',photoBalance:2},
-            {id:101,label:'XROS 3 Black'}
-          ];
           let token=null, calls=0;
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
@@ -82,94 +78,26 @@ jobs:
             if(!response.ok) throw Error('HTTP '+response.status);
             try{return await response.json();}catch{throw Error('Invalid JSON');}
           }
-          function balances(raw,asked) {
-            const list=rows(raw,['balances','nomenclatures','items','data','result'],['nomenclature']);
-            const allowed=new Set(asked), map=new Map();
-            for(const r of list) {
-              const id=int(r.nomenclature);
-              if(id===null||!allowed.has(id)||map.has(id))
-                throw Error('Unexpected or duplicated balance ID');
-              map.set(id,number(r.balance));
-            }
-            return map;
-          }
-          async function direct(store,asked,label) {
-            const params={nomenclatures:asked,warehouses:[store.warehouseId],companies:[store.companyId]};
-            try {
-              const raw=await get('nomenclature/balances',params,label);
-              return balances(raw,asked);
-            }catch(err) {
-              if(err.message!=='HTTP 400'&&err.message!=='HTTP 422') throw err;
-              // Some Saby installations accept JSON-encoded arrays rather than repeated keys.
-              const raw=await get('nomenclature/balances',params,label+' (JSON arrays)','json');
-              return balances(raw,asked);
-            }
-          }
-          function outcome(map,id) {
-            if(!map.has(id))return {status:'missing',balance:null};
-            const n=map.get(id);
-            return n===null?{status:'invalid',balance:null}:
-              {status:n>0?'positive':n===0?'zero':'negative',balance:n};
-          }
-
-          async function priceListIds(store) {
-            const lists = new Set();
-            const actualDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow'}).format(new Date());
-            for(let page=0;;page++){
-              const raw=await get('nomenclature/price-list',{pointId:store.pointId,actualDate,page,pageSize:100},store.name+' price lists');
-              const list=rows(raw,['priceLists','priceList','priceListItems','prices','items','data','result'],['id']);
-              for(const row of list){
-                const id=int(row.id);
-                if(!id||lists.has(id))throw Error('Invalid or repeated price list ID');
-                lists.add(id);
-              }
-              if(raw?.outcome?.hasMore===false || (raw?.outcome?.hasMore!==true && list.length<100))return [...lists];
-              if(!list.length)throw Error('Invalid price list pagination');
-            }
-          }
-          async function byPriceList(store, listId, targetIds){
-            const params={priceListIds:[listId],warehouses:[store.warehouseId],companies:[store.companyId]};
-            const raw=await get('nomenclature/balances',params,store.name+' balances by price list');
-            const result=new Map();
-            for(const row of rows(raw,['balances','nomenclatures','items','data','result'],['nomenclature'])){
-              const id=int(row.nomenclature);
-              if(!targetIds.has(id))continue;
-              const value=number(row.balance);
-              if(result.has(id)&&result.get(id)!==value)throw Error('Conflicting balance rows');
-              result.set(id,value);
-            }
-            return result;
-          }
-          function reportResult(label, item, balancesById) {
-            const result = outcome(balancesById, item.id);
-            const comparison = item.photoBalance === undefined || result.balance === null
-              ? '' : '; matches photographed warehouse balance: '+(result.balance===item.photoBalance);
-            console.log(label+' '+item.label+': '+result.status+comparison);
-          }
-
           async function main() {
             await login();
-
-            for(const item of cases) {
+            const checks = [
+              ['NUM folder without balances', {folder:14500,withBalance:false}],
+              ['NUM folder at Bauman with balances', {folder:14500,pointId:store.pointId,withBalance:true}],
+              ['NUM search without folder or balances', {searchString:'NUM НЯМ',withBalance:false}],
+              ['XROS control search without balances', {searchString:'XROS 5',withBalance:false}]
+            ];
+            for (const [label,params] of checks) {
               try {
-                reportResult('Direct',item,await direct(store,[item.id],item.label+' single ID'));
+                const result=await get('v2/nomenclature/list',{...params,page:0,pageSize:10},label);
+                const records=rows(result,['nomenclatures'],['id','name']);
+                console.log(label+': folders='+records.filter(record=>record.isParent).length+
+                  ', items='+records.filter(record=>!record.isParent).length+', more='+String(result.outcome?.hasMore));
               } catch(error) {
-                console.log('Direct '+item.label+': '+safeError(error));
-                process.exitCode=1;
+                console.log(label+': '+safeError(error));
+                if (!/^HTTP [0-9]{3}$/.test(error.message)) process.exitCode=1;
               }
             }
-
-            const ids = new Set(cases.map(item=>item.id));
-            const batch = await direct(store, [...ids], 'XROS warehouse batch');
-            for (const item of cases) reportResult('Batch', item, batch);
-            const priceLists = await priceListIds(store);
-            console.log('Active price lists: '+priceLists.length);
-            for(const listId of priceLists) {
-              const values = await byPriceList(store,listId,ids);
-              for(const item of cases) reportResult('Price list '+listId,item,values);
-            }
           }
-
           function safeError(error) {
             const message = String(error?.message);
             return /^(HTTP [0-9]{3}|Network or timeout|Invalid JSON|Unexpected response structure|Missing repository secrets|Authorization token missing|Authorization HTTP [0-9]{3}|GET request budget exceeded|Store mapping changed)$/.test(message)
