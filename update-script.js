@@ -1,8 +1,21 @@
-// Saby catalog synchronization. Candidate version: test without publishing first.
+// Saby catalog synchronization.
 'use strict';
 const fs = require('node:fs');
 const BASE = 'https://api.sbis.ru/retail/';
-const STORE_ORDER = ['Баумана','ГУМ','Гаджиева','КТМ','Крупской','Книповича','Кольский','Ленина','Мир','ПЗ','Североморск'];
+const WAREHOUSES = new Map([
+  ['Баумана', {pointId:14401, warehouseId:14403, companyId:249}],
+  ['ГУМ', {pointId:433, warehouseId:303, companyId:249}],
+  ['Гаджиева', {pointId:14406, warehouseId:14408, companyId:249}],
+  ['КТМ', {pointId:14179, warehouseId:14000, companyId:249}],
+  ['Крупской', {pointId:16974, warehouseId:16976, companyId:249}],
+  ['Книповича', {pointId:14412, warehouseId:14414, companyId:249}],
+  ['Кольский', {pointId:446, warehouseId:293, companyId:249}],
+  ['Ленина', {pointId:409, warehouseId:305, companyId:249}],
+  ['Мир', {pointId:11101, warehouseId:11103, companyId:11091}],
+  ['ПЗ', {pointId:452, warehouseId:309, companyId:249}],
+  ['Североморск', {pointId:18093, warehouseId:18095, companyId:17792}],
+]);
+const STORE_ORDER = [...WAREHOUSES.keys()];
 const EXCLUDE_ROOTS = ['вывод из ассортимента'];
 const COLORS = ['#9fd8ff','#ffb36b','#ff8fb1','#b9a5ff','#ffd23f','#8be28b','#7fe3d6','#f2a0ff','#ff7a59','#c9e6ff'];
 const sort = new Intl.Collator('ru');
@@ -31,7 +44,14 @@ if(!r.ok) throw Error('Authorization HTTP '+r.status);
 const d=await r.json(); token=d.token||d.access_token; if(typeof token!=='string'||!token) throw Error('Missing access token');
 }
 async function get(path, params){
-const u=new URL(path,BASE); for(const [k,v] of Object.entries(params)) if(v!=null) u.searchParams.set(k,String(v));
+const u = new URL(path, BASE);
+for (const [name, value] of Object.entries(params)) {
+  if (Array.isArray(value)) {
+    for (const entry of value) u.searchParams.append(name, String(entry));
+  } else if (value != null) {
+    u.searchParams.set(name, String(value));
+  }
+}
 let relogged=false;
 for(let a=1;a<=4;a++){
 if(++requests>12000) throw Error('Request budget exceeded');
@@ -65,13 +85,48 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!(e.status>=500))thro
 }
 throw err;
 }
+async function fillWarehouseBalances(api, store, missing, storeIndex) {
+  const batchSize = 50;
+  for (let start = 0; start < missing.length; start += batchSize) {
+    const batch = new Map(missing.slice(start, start + batchSize).map(leaf => [leaf.id, leaf]));
+    const params = {
+      nomenclatures: [...batch.keys()],
+      warehouses: [store.warehouseId],
+      companies: [store.companyId],
+    };
+    let response;
+    try {
+      response = await api.get('nomenclature/balances', params);
+    } catch (error) {
+      if (error.status !== 400 && error.status !== 422) throw error;
+      const jsonParams = Object.fromEntries(Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]));
+      response = await api.get('nomenclature/balances', jsonParams);
+    }
+    const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
+    const result = Array.isArray(response) ? response : response?.[fields.find(name => response?.[name] != null)];
+    const records = result && typeof result === 'object'
+      ? (Array.isArray(result) ? result : 'nomenclature' in result ? [result] : Object.values(result))
+      : null;
+    if (!records) throw Error('Invalid warehouse balance response for '+store.name);
+    const seen = new Set();
+    for (const record of records) {
+      const id = key(record?.nomenclature);
+      if (!batch.has(id) || seen.has(id)) throw Error('Unexpected or repeated warehouse item for '+store.name);
+      seen.add(id);
+      batch.get(id).stock[storeIndex] = numeric(record.balance);
+    }
+  }
+}
+
 async function sync(api,prev,log=console.log){
 await api.login();
 const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
 const stores=STORE_ORDER.map(name=>{
 const target=normalize(name);const matches=points.filter(p=>normalize(p.name)===target||(target==='гаджиева'&&normalize(p.name)==='гаджиево'));
 if(matches.length!==1) throw Error('Sales point not unique: '+name);
-return {name,id:key(matches[0].id)};
+const mapping = WAREHOUSES.get(name);
+if (key(matches[0].id) !== String(mapping.pointId)) throw Error('Store ID changed: '+name);
+return {name,id:String(mapping.pointId),...mapping};
 });
 if(new Set(stores.map(s=>s.id)).size!==stores.length) throw Error('Duplicate sales point ID');
 const nodes=new Set(),ids=new Set();
@@ -99,24 +154,23 @@ function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gat
 roots.forEach(gather);
 if(!ids.size)throw Error('Empty global catalog');
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
-// We deliberately never treat missing rows as confirmed zero stock.
-// If the API omits a row, retain the published file unchanged and report how many are unknown.
-let unknown=0;
-for(let si=0;si<stores.length;si++){
-const store=stores[si];let missing=0,positive=0;
-for(const n of leafFolders){
-const results=await folder(api,{pointId:store.id,folder:n.hid,withBalance:true});
-const mapped=new Map(results.filter(x=>!x.isParent).map(x=>[key(x.id),x]));
-for(const leaf of n.leaves){
-const r=mapped.get(leaf.id);
-const b=numeric(r?.balance);
-leaf.stock[si]=b;leaf.pointCosts[si]=numeric(r?.cost);
-if(b===null)missing++; else if(b>0)positive++;
+for (const [si, store] of stores.entries()) {
+  const missing = [];
+  for (const n of leafFolders) {
+    const results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
+    const mapped = new Map(results.filter(x => !x.isParent).map(x => [key(x.id),x]));
+    for (const leaf of n.leaves) {
+      const row = mapped.get(leaf.id);
+      leaf.stock[si] = numeric(row?.balance);
+      leaf.pointCosts[si] = numeric(row?.cost);
+      if (leaf.stock[si] === null) missing.push(leaf);
+    }
+  }
+  await fillWarehouseBalances(api, store, missing, si);
+  const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
+  const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
+  log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
-}
-unknown+=missing;log(`Stock ${store.name}: positive=${positive}; unknown=${missing}; requests=${api.count()}`);
-}
-if(unknown)throw Error(`Unknown balances: ${unknown}. data.json unchanged; verify API omission semantics.`);
 const categories=[];let total=0;
 for(const root of roots.slice().sort(byName)){
 const items=[];
@@ -125,7 +179,11 @@ if(n.leaves.length){
 const leaves=n.leaves.slice().sort(byName);
 const prices=leaves.map(l=>{const preferred=l.pointCosts[0];if(preferred>0)return preferred;if(l.cost>0)return l.cost;const candidates=l.pointCosts.filter(c=>c>0);return candidates.length?Math.min(...candidates):null;});
 if(prices.some(p=>p===null))throw Error('Missing valid prices in '+n.name);
-const flavors=leaves.map(l=>({name:clean(l.name,n.name),stores:l.stock.flatMap((v,i)=>v>0?[i]:[])}));
+const flavors = leaves.map(leaf => ({
+  name: clean(leaf.name,n.name),
+  stores: leaf.stock.flatMap((value,index) => value > 0 ? [index] : []),
+  stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),
+}));
 items.push({name:n.name,meta:'',price:Math.min(...prices),color:colorFor(n.name),flavors});total+=flavors.length;
 }
 n.children.slice().sort(byName).forEach(collect);
