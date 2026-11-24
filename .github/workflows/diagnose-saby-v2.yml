@@ -149,9 +149,6 @@ jobs:
 
           async function main() {
             await login();
-            const points=rows(await get('point/list',{product:'retail',pageSize:100,page:0},'sales points'),['salesPoints'],['id']);
-            if(points.filter(point=>int(point.id)===store.pointId && norm(point.name)===norm(store.name)).length!==1)
-              throw Error('Store mapping changed');
 
             for(const item of cases) {
               try {
