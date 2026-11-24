@@ -55,7 +55,7 @@ for (const [name, value] of Object.entries(params)) {
 let relogged=false;
 for(let a=1;a<=4;a++){
 if(++requests>12000) throw Error('Request budget exceeded');
-await pause(150);
+await pause(path === 'nomenclature/balances' ? 1500 : 450);
 let r;
 try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===4) throw Error('Network/timeout'); await pause(1000*a);continue;}
 if(r.ok) return r.json();
@@ -85,7 +85,7 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!(e.status>=500))thro
 }
 throw err;
 }
-async function fillWarehouseBalances(api, store, missing, storeIndex) {
+async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
   const batchSize = 50;
   for (let start = 0; start < missing.length; start += batchSize) {
     const batch = new Map(missing.slice(start, start + batchSize).map(leaf => [leaf.id, leaf]));
@@ -96,11 +96,15 @@ async function fillWarehouseBalances(api, store, missing, storeIndex) {
     };
     let response;
     try {
-      response = await api.get('nomenclature/balances', params);
+      response = await api.get('nomenclature/balances', params).catch(error => {
+        if (error.status !== 400 && error.status !== 422) throw error;
+        const jsonParams = Object.fromEntries(Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]));
+        return api.get('nomenclature/balances', jsonParams);
+      });
     } catch (error) {
-      if (error.status !== 400 && error.status !== 422) throw error;
-      const jsonParams = Object.fromEntries(Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]));
-      response = await api.get('nomenclature/balances', jsonParams);
+      if (!(error.status >= 500)) throw error;
+      log(`Warehouse ${store.name}: HTTP ${error.status}; ${batch.size} balances remain unconfirmed`);
+      continue;
     }
     const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
     const result = Array.isArray(response) ? response : response?.[fields.find(name => response?.[name] != null)];
@@ -118,7 +122,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex) {
   }
 }
 
-async function sync(api,prev,log=console.log){
+async function sync(api,prev,log=console.log,{allowIncompletePreview=false}={}){
 await api.login();
 const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
 const stores=STORE_ORDER.map(name=>{
@@ -130,25 +134,47 @@ return {name,id:String(mapping.pointId),...mapping};
 });
 if(new Set(stores.map(s=>s.id)).size!==stores.length) throw Error('Duplicate sales point ID');
 const nodes=new Set(),ids=new Set();
-async function walk(parent=null,depth=0){
+const deferredFolders=[];
+async function walk(node,depth=0,defer=true){
 if(depth>12) throw Error('Catalog nesting limit');
-const arr=await folder(api,{folder:parent,withBalance:false});
-const children=[],leaves=[];
+const parent=node.hid;
+let arr;
+try {
+  arr=await folder(api,{folder:parent,withBalance:false});
+} catch (error) {
+  if (parent === null || !(error.status >= 500)) throw error;
+  log(`Catalog folder ${node.name} (ID ${parent}): HTTP ${error.status}${defer ? '; retry deferred' : '; still unread'}`);
+  if (defer) deferredFolders.push({node,depth});
+  return false;
+}
+const {children,leaves}=node;
 for(const x of arr){
 const name=String(x.name??'').trim(); if(!name) throw Error('Unnamed catalog row');
 if(x.isParent){
 if(parent===null&&EXCLUDE_ROOTS.includes(normalize(name)))continue;
 const hid=key(x.hierarchicalId??x.id);if(nodes.has(hid))throw Error('Duplicate catalog folder');nodes.add(hid);
-const sub=await walk(hid,depth+1).catch(e=>{if(!e.folderContext){e.message+="; folder="+JSON.stringify(name)+" id="+hid;e.folderContext=true;}throw e;});children.push({name,hid,...sub});
+const child={name,hid,children:[],leaves:[]};
+children.push(child);
+await walk(child,depth+1);
 } else {
 if(parent===null)throw Error('Root-level product requires catalog mapping');
 const id=key(x.id);if(ids.has(id))throw Error('Duplicate catalog product ID');ids.add(id);
 leaves.push({id,name,cost:numeric(x.cost),stock:Array(stores.length).fill(null),pointCosts:Array(stores.length).fill(null)});
 }
 }
-return {children,leaves};
+return true;
 }
-const roots=(await walk()).children;
+const root={hid:null,children:[],leaves:[]};
+await walk(root);
+const unreadFolders=[];
+for (const {node,depth} of deferredFolders) {
+  if (!await walk(node,depth,false)) unreadFolders.push(node);
+}
+const roots=root.children;
+if (unreadFolders.length && !allowIncompletePreview) {
+  throw Error(`Saby did not return ${unreadFolders.length} catalog folders; publication blocked`);
+}
+if (unreadFolders.length) log(`Incomplete catalog preview: ${unreadFolders.length} unread folders`);
 let leafFolders=[];
 function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gather);}
 roots.forEach(gather);
@@ -157,7 +183,14 @@ log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stor
 for (const [si, store] of stores.entries()) {
   const missing = [];
   for (const n of leafFolders) {
-    const results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
+    let results;
+    try {
+      results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
+    } catch (error) {
+      if (!(error.status >= 500)) throw error;
+      log(`Stock ${store.name}, ${n.name}: HTTP ${error.status}; checking items by warehouse`);
+      results = [];
+    }
     const mapped = new Map(results.filter(x => !x.isParent).map(x => [key(x.id),x]));
     for (const leaf of n.leaves) {
       const row = mapped.get(leaf.id);
@@ -166,7 +199,7 @@ for (const [si, store] of stores.entries()) {
       if (leaf.stock[si] === null) missing.push(leaf);
     }
   }
-  await fillWarehouseBalances(api, store, missing, si);
+  await fillWarehouseBalances(api, store, missing, si, log);
   const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
   const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
@@ -191,16 +224,30 @@ n.children.slice().sort(byName).forEach(collect);
 collect(root);if(items.length)categories.push({name:root.name,items});
 }
 const oldCount=prev.categories.reduce((a,c)=>a+c.items.reduce((b,it)=>b+it.flavors.length,0),0);
-if(total<oldCount)throw Error(`Catalog shrank from ${oldCount} to ${total}; manual review required`);
+if(!unreadFolders.length&&total<oldCount)throw Error(`Catalog shrank from ${oldCount} to ${total}; manual review required`);
 const newCats=new Set(categories.map(c=>normalize(c.name)));
-if(prev.categories.some(c=>!EXCLUDE_ROOTS.includes(normalize(c.name))&&!newCats.has(normalize(c.name))))throw Error('Previously published category missing; manual review required');
+if(!unreadFolders.length&&prev.categories.some(c=>!EXCLUDE_ROOTS.includes(normalize(c.name))&&!newCats.has(normalize(c.name))))throw Error('Previously published category missing; manual review required');
 log(`Result: ${categories.length} categories; ${total} positions; old positions=${oldCount}; requests=${api.count()}`);
-return {stores:stores.map(s=>s.name),categories};
+return {
+  stores:stores.map(s=>s.name),
+  categories,
+  ...(unreadFolders.length ? {unreadFolders:unreadFolders.map(({hid,name})=>({id:hid,name}))} : {}),
+};
 }
 async function main(){
 const started=Date.now();const prev=JSON.parse(fs.readFileSync('data.json','utf8'));
 if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores))throw Error('Unexpected current data.json format');
-const api=client(process.env);const content=await sync(api,prev);
+const api=client(process.env);
+const previewPath=process.argv[2];
+const content=await sync(api,prev,console.log,{allowIncompletePreview:Boolean(previewPath)});
+if (previewPath) {
+  if (require('node:path').resolve(previewPath) === require('node:path').resolve('data.json')) {
+    throw Error('Preview must use a separate output path');
+  }
+  fs.writeFileSync(previewPath,JSON.stringify({updated:new Date().toISOString(),...content}));
+  console.log(`Preview written; unread folders=${content.unreadFolders?.length ?? 0}; requests=${api.count()}`);
+  return;
+}
 if(JSON.stringify(content)===JSON.stringify({stores:prev.stores,categories:prev.categories}))console.log('No changes.');
 else {const tmp='data.json.saby.tmp';fs.writeFileSync(tmp,JSON.stringify({updated:new Date().toISOString(),...content}));fs.renameSync(tmp,'data.json');console.log('Candidate data.json generated locally.');}
 console.log(`Completed in ${Math.round((Date.now()-started)/1000)} s; requests=${api.count()}`);
