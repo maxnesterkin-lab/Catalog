@@ -1,8 +1,8 @@
-name: Diagnose Saby API - Test 88
+name: Diagnose Saby API - Test 90
 on:
   push:
     branches:
-      - test-catalog-v88-20261124
+      - test-catalog-v90-20261124
     paths:
       - .github/workflows/diagnose-saby-v2.yml
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.ref == 'refs/heads/test-catalog-v88-20261124'
+    if: github.ref == 'refs/heads/test-catalog-v90-20261124'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -51,13 +51,13 @@ jobs:
             {name:'Североморск',pointId:18093,warehouseId:18095,companyId:17792},
           ];
           const report = {
-            test:88, branch:'test-catalog-v88-20261124',
+            test:90, branch:'test-catalog-v90-20261124',
             mode:'READ_ONLY_NO_PUBLISH', startedAt:new Date().toISOString(),
-            source:'data.json schemaVersion=87 or later; direct Saby balances API',
+            source:'Saby balances by product ID and by current point price list',
             requestCount:0, targetCount:0, stores:[], controls:[], errors:[],
             completed:false, allRequestsSucceeded:false
           };
-          const save = () => fs.writeFileSync('diagnostic-88.json', JSON.stringify(report,null,2));
+          const save = () => fs.writeFileSync('diagnostic-90.json', JSON.stringify(report,null,2));
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
           const norm = v => String(v??'').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
@@ -106,7 +106,7 @@ jobs:
             console.log('Saby authorization OK; token hidden');
           }
           async function get(path,params,label,encoding='repeat') {
-            if(++calls>135) throw Error('GET request budget exceeded');
+            if(++calls>350) throw Error('GET request budget exceeded');
             await sleep(2000); // previous 150 ms pacing caused bursts of HTTP 500
             const url=new URL(path,API);
             for(const [k,v] of Object.entries(params)) {
@@ -154,6 +154,34 @@ jobs:
               {status:n>0?'positive':n===0?'zero':'negative',balance:n};
           }
 
+          async function priceListIds(store) {
+            const lists = new Set();
+            const actualDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow'}).format(new Date());
+            for(let page=0;;page++){
+              const raw=await get('nomenclature/price-list',{pointId:store.pointId,actualDate,page,pageSize:100},store.name+' price lists');
+              const list=rows(raw,['priceLists','priceList','priceListItems','prices','items','data','result'],['id']);
+              for(const row of list){
+                const id=int(row.id);
+                if(!id||lists.has(id))throw Error('Invalid or repeated price list ID');
+                lists.add(id);
+              }
+              if(raw?.outcome?.hasMore===false || (raw?.outcome?.hasMore!==true && list.length<100))return [...lists];
+              if(!list.length)throw Error('Invalid price list pagination');
+            }
+          }
+          async function byPriceList(store, listId, targetIds){
+            const params={priceListIds:[listId],warehouses:[store.warehouseId],companies:[store.companyId]};
+            const raw=await get('nomenclature/balances',params,store.name+' balances by price list');
+            const result=new Map();
+            for(const row of rows(raw,['balances','nomenclatures','items','data','result'],['nomenclature'])){
+              const id=int(row.nomenclature);
+              if(!targetIds.has(id))continue;
+              const value=number(row.balance);
+              if(result.has(id)&&result.get(id)!==value)throw Error('Conflicting balance rows');
+              result.set(id,value);
+            }
+            return result;
+          }
           async function main() {
             await login();
             const points=rows(await get('point/list',{product:'retail',pageSize:100,page:0},'sales points'),['salesPoints'],['id']);
@@ -204,6 +232,28 @@ jobs:
                   report.errors.push({store:store.name,id,reason:'Single-ID check failed'});
                 }
               }
+              const targetIds=new Set(ids);
+              try{
+                entry.priceLists=await priceListIds(store);
+                const matches=new Map(), conflicts=new Set();
+                for(const listId of entry.priceLists){
+                  const values=await byPriceList(store,listId,targetIds);
+                  for(const [id,value] of values){
+                    if(value===null)continue;
+                    if(matches.has(id)&&matches.get(id)!==value)conflicts.add(id);
+                    matches.set(id,value);
+                  }
+                }
+                entry.priceListConflicts=[...conflicts];
+                for(const [id,value] of matches){
+                  if(conflicts.has(id))continue;
+                  const prior=detail.get(id);
+                  if(prior?.status!=='missing')continue;
+                  detail.set(id,{id,status:value>0?'positive':value===0?'zero':'negative',balance:value,source:'priceList'});
+                }
+              }catch(e){
+                report.errors.push({store:store.name,stage:'price lists',reason:String(e.message).slice(0,100)});
+              }
               entry.items=ids.map(id=>detail.get(id));
               for(const item of entry.items)entry.counts[item.status]++;
               entry.controls=controlIds.map(id=>detail.get(id));
@@ -233,7 +283,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-88
-          path: diagnostic-88.json
+          name: diagnostic-90
+          path: diagnostic-90.json
           if-no-files-found: warn
           retention-days: 7
