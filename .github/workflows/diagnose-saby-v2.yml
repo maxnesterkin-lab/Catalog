@@ -1,4 +1,4 @@
-name: Diagnose Saby API - Test 82
+name: Diagnose Saby API - XROS stock check
 on:
   push:
     branches:
@@ -14,7 +14,7 @@ jobs:
   diagnose:
     if: github.ref == 'refs/heads/test-catalog-v82-20261123'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 5
     steps:
       - name: Checkout test catalog only
         uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Diagnose 181 missing-stock variants (read only)
+      - name: Compare XROS balances by warehouse (read only)
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
@@ -39,25 +39,17 @@ jobs:
           const API = 'https://api.sbis.ru/retail/';
           const stores = [
             {name:'Баумана',pointId:14401,warehouseId:14403,companyId:249},
-            {name:'ГУМ',pointId:433,warehouseId:303,companyId:249},
             {name:'Гаджиева',pointId:14406,warehouseId:14408,companyId:249},
             {name:'КТМ',pointId:14179,warehouseId:14000,companyId:249},
-            {name:'Крупской',pointId:16974,warehouseId:16976,companyId:249},
-            {name:'Книповича',pointId:14412,warehouseId:14414,companyId:249},
-            {name:'Кольский',pointId:446,warehouseId:293,companyId:249},
-            {name:'Ленина',pointId:409,warehouseId:305,companyId:249},
-            {name:'Мир',pointId:11101,warehouseId:11103,companyId:11091},
-            {name:'ПЗ',pointId:452,warehouseId:309,companyId:249},
-            {name:'Североморск',pointId:18093,warehouseId:18095,companyId:17792},
           ];
           const report = {
-            test:82, branch:'test-catalog-v82-20261123',
+            test:'xros-stock', branch:'test-catalog-v82-20261123',
             mode:'READ_ONLY_NO_PUBLISH', startedAt:new Date().toISOString(),
-            source:'data.json schemaVersion=81; direct Saby balances API',
-            requestCount:0, targetCount:0, stores:[], controls:[], errors:[],
+            source:'Saby Retail balances API',
+            requestCount:0, stores:[], errors:[],
             completed:false, allRequestsSucceeded:false
           };
-          const save = () => fs.writeFileSync('diagnostic-82.json', JSON.stringify(report,null,2));
+          const save = () => fs.writeFileSync('diagnostic-xros.json', JSON.stringify(report,null,2));
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
           const norm = v => String(v??'').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
@@ -69,24 +61,15 @@ jobs:
               throw Error('Unexpected response structure');
             return v;
           }
-          const d=JSON.parse(fs.readFileSync('data.json','utf8'));
-          if(d.schemaVersion!=='81'||d.previewOnly!==true||d.stores?.length!==stores.length)
-            throw Error('Unexpected test catalog snapshot; no API calls performed');
-          if(stores.some((s,i)=>s.name!==d.stores[i]))
-            throw Error('Store order changed; no API calls performed');
-          const positions=d.categories.flatMap(c=>c.items.flatMap(p=>p.flavors));
-          const target=positions.filter(f=>Array.isArray(f.stockStatus)&&f.stockStatus.includes('missing'));
-          const ids=target.map(f=>int(f.id));
-          if(target.length!==181||ids.some(id=>id===null)||new Set(ids).size!==ids.length||
-             target.some(f=>f.stockStatus.length!==11||f.stockStatus.some(s=>s!=='missing'))||
-             d.verification?.restoredWithUnknownStock!==181)
-            throw Error('181-target invariant failed; no API calls performed');
-          report.targetCount=ids.length;
-          report.snapshotVersion=d.schemaVersion;
-          report.snapshotDate=d.updated;
-          // Controls are outside the missing-stock target; use only to compare API semantics.
-          const controlIds=[3629,3634,6220].filter(id=>!ids.includes(id));
-          report.controlIds=controlIds;
+          const ids = [101, 14391]; // XROS 3 Black, XROS 5 Kit Brown Leather
+          report.products = {101:'XROS 3 Black',14391:'XROS 5 Kit Brown Leather'};
+          const catalog = JSON.parse(fs.readFileSync('data.json','utf8'));
+          const products = catalog.categories.flatMap(c=>c.items.flatMap(p=>p.flavors));
+          for (const id of ids) {
+            const matches = products.filter(f=>int(f.id)===id);
+            if (matches.length!==1 || norm(matches[0].name.replace(/[^\p{L}\p{N} ]/gu,' ').replace(/ +/g,' '))!==norm(report.products[id].toLowerCase()))
+              throw Error('Unexpected catalog product '+id);
+          }
           save();
 
           let token=null, calls=0;
@@ -107,7 +90,8 @@ jobs:
             console.log('Saby authorization OK; token hidden');
           }
           async function get(path,params,label,encoding='repeat') {
-            if(++calls>135) throw Error('GET request budget exceeded');
+            if(++calls>24) throw Error('GET request budget exceeded');
+            report.requestCount=calls;
             await sleep(2000); // previous 150 ms pacing caused bursts of HTTP 500
             const url=new URL(path,API);
             for(const [k,v] of Object.entries(params)) {
@@ -120,7 +104,6 @@ jobs:
             try {
               response=await fetch(url,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});
             }catch{throw Error('Network or timeout');}
-            report.requestCount=calls;
             console.log('GET '+calls+' '+label+': HTTP '+response.status);
             if(!response.ok) throw Error('HTTP '+response.status);
             try{return await response.json();}catch{throw Error('Invalid JSON');}
@@ -168,58 +151,26 @@ jobs:
             // These IDs are never used for a write, and this run does not assert re-verification.
             report.warehouseMappingSource='Earlier tests 72-74 (not re-verified in this run)';
             save();
-            const allIds=[...ids,...controlIds], batchSize=50;
-            for(const store of stores) {
-              const detail=new Map();
-              const entry={name:store.name,pointId:store.pointId,
-                companyId:store.companyId,warehouseId:store.warehouseId,
-                requestsOK:0,requestsFailed:0,items:[],counts:{positive:0,zero:0,negative:0,missing:0,invalid:0,error:0},
-                sampleSingleChecks:[]};
-              report.stores.push(entry);
-              for(let start=0;start<allIds.length;start+=batchSize) {
-                const asked=allIds.slice(start,start+batchSize);
+            for (const store of stores) {
+              const checks = [];
+              report.stores.push({name:store.name, warehouseId:store.warehouseId, checks});
+              for (const asked of [ids, ...ids.map(id=>[id])]) {
+                const label = asked.length>1?'batch':'single';
                 try {
-                  const result=await direct(store,asked,store.name+' batch '+(1+Math.floor(start/batchSize)));
-                  for(const id of asked)detail.set(id,{id,...outcome(result,id),source:'batch'});
-                  entry.requestsOK++;
-                } catch(err) {
-                  entry.requestsFailed++;
-                  const reason=/^(HTTP [0-9]{3}|Network or timeout|Invalid JSON|Unexpected response structure|Unexpected or duplicated balance ID|GET request budget exceeded)$/.test(err.message)?err.message:'Unexpected API error';
-                  report.errors.push({store:store.name,batch:1+Math.floor(start/batchSize),reason});
-                  for(const id of asked)detail.set(id,{id,status:'error',balance:null,source:'batch'});
+                  const result = await direct(store,asked,store.name+' '+label+' '+asked.join(','));
+                  checks.push({mode:label,items:asked.map(id=>({id,...outcome(result,id)}))});
+                } catch (error) {
+                  report.errors.push({store:store.name,mode:label,ids:asked,reason:error.message});
+                  checks.push({mode:label,items:asked.map(id=>({id,status:'error',balance:null}))});
                 }
+                console.log('XROS_RESULT '+JSON.stringify({store:store.name,...checks.at(-1)}));
+                save();
               }
-              // Probe a few missing cells individually. A missing bulk row is NOT zero.
-              const toProbe=[3628,...ids].filter((id,i,a)=>a.indexOf(id)===i)
-                .filter(id=>detail.get(id)?.status==='missing').slice(0,3);
-              for(const id of toProbe) {
-                try {
-                  const single=await direct(store,[id],store.name+' single ID '+id);
-                  const x=outcome(single,id);
-                  entry.sampleSingleChecks.push({id,...x});
-                  if(x.status!=='missing'&&x.status!=='invalid')
-                    detail.set(id,{id,...x,source:'single',batchStatus:'missing'});
-                } catch(err) {
-                  entry.sampleSingleChecks.push({id,status:'error'});
-                  report.errors.push({store:store.name,id,reason:'Single-ID check failed'});
-                }
-              }
-              entry.items=ids.map(id=>detail.get(id));
-              for(const item of entry.items)entry.counts[item.status]++;
-              entry.controls=controlIds.map(id=>detail.get(id));
-              console.log(store.name+': '+JSON.stringify(entry.counts)+'; requests failed '+entry.requestsFailed);
-              save();
             }
             report.completed=true;
             report.allRequestsSucceeded=report.errors.length===0;
             report.finishedAt=new Date().toISOString();
-            report.totals={positive:0,zero:0,negative:0,missing:0,invalid:0,error:0};
-            for(const s of report.stores)for(const [k,v] of Object.entries(s.counts))report.totals[k]+=v;
-            report.note='This is a live read-only API snapshot, not the 23 Nov warehouse report. Absent or invalid balances are never converted to zero. No data.json/index.html changes.';
             save();
-            console.log('Total target cells: '+(ids.length*stores.length));
-            console.log('Result totals: '+JSON.stringify(report.totals));
-            console.log('NO DATA PUBLISHED OR MODIFIED.');
             if(report.errors.length) process.exitCode=1;
           }
           main().catch(err=>{
@@ -233,7 +184,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-82
-          path: diagnostic-82.json
+          name: diagnostic-xros
+          path: diagnostic-xros.json
           if-no-files-found: warn
           retention-days: 7
