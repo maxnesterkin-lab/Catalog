@@ -1,8 +1,8 @@
-name: Diagnose Saby API - Test 90
+name: Diagnose Saby API - XROS Bauman
 on:
   push:
     branches:
-      - test-catalog-v90-20261124
+      - saby-check-xros-baumana-20261124
     paths:
       - .github/workflows/diagnose-saby-v2.yml
   workflow_dispatch:
@@ -12,21 +12,16 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.ref == 'refs/heads/test-catalog-v90-20261124'
+    if: github.ref == 'refs/heads/saby-check-xros-baumana-20261124'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 8
     steps:
-      - name: Checkout test catalog only
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Recheck variants with incomplete stock (read only)
+      - name: Read XROS balances for Bauman warehouse
         env:
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
@@ -34,30 +29,14 @@ jobs:
         run: |
           node <<'JS'
           'use strict';
-          const fs = require('node:fs');
           const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
           const API = 'https://api.sbis.ru/retail/';
-          const stores = [
-            {name:'Баумана',pointId:14401,warehouseId:14403,companyId:249},
-            {name:'ГУМ',pointId:433,warehouseId:303,companyId:249},
-            {name:'Гаджиева',pointId:14406,warehouseId:14408,companyId:249},
-            {name:'КТМ',pointId:14179,warehouseId:14000,companyId:249},
-            {name:'Крупской',pointId:16974,warehouseId:16976,companyId:249},
-            {name:'Книповича',pointId:14412,warehouseId:14414,companyId:249},
-            {name:'Кольский',pointId:446,warehouseId:293,companyId:249},
-            {name:'Ленина',pointId:409,warehouseId:305,companyId:249},
-            {name:'Мир',pointId:11101,warehouseId:11103,companyId:11091},
-            {name:'ПЗ',pointId:452,warehouseId:309,companyId:249},
-            {name:'Североморск',pointId:18093,warehouseId:18095,companyId:17792},
+          const store = {name:'Баумана',pointId:14401,warehouseId:14403,companyId:249};
+          const cases = [
+            {id:14391,label:'XROS 5 Kit Brown Leather',photoBalance:2},
+            {id:101,label:'XROS 3 Black'}
           ];
-          const report = {
-            test:90, branch:'test-catalog-v90-20261124',
-            mode:'READ_ONLY_NO_PUBLISH', startedAt:new Date().toISOString(),
-            source:'Saby balances by product ID and by current point price list',
-            requestCount:0, targetCount:0, stores:[], controls:[], errors:[],
-            completed:false, allRequestsSucceeded:false
-          };
-          const save = () => fs.writeFileSync('diagnostic-90.json', JSON.stringify(report,null,2));
+          let token=null, calls=0;
           const number = v => v == null || typeof v==='boolean' || String(v).trim()==='' || !Number.isFinite(Number(v)) ? null : Number(v);
           const int = v => {const n=number(v);return Number.isSafeInteger(n)&&n>0?n:null;};
           const norm = v => String(v??'').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
@@ -69,26 +48,6 @@ jobs:
               throw Error('Unexpected response structure');
             return v;
           }
-          const d=JSON.parse(fs.readFileSync('data.json','utf8'));
-          if(Number(d.schemaVersion)<87||d.previewOnly!==true||d.stores?.length!==stores.length)
-            throw Error('Unexpected test catalog snapshot; no API calls performed');
-          if(stores.some((s,i)=>s.name!==d.stores[i]))
-            throw Error('Store order changed; no API calls performed');
-          const positions=d.categories.flatMap(c=>c.items.flatMap(p=>p.flavors));
-          const target=positions.filter(f=>Array.isArray(f.stockStatus)&&f.stockStatus.includes('missing'));
-          const ids=target.map(f=>int(f.id));
-          if(ids.some(id=>id===null)||new Set(ids).size!==ids.length||
-             target.some(f=>f.stockStatus.length!==stores.length))
-            throw Error('Invalid target IDs or inventory dimensions');
-          report.targetCount=ids.length;
-          report.snapshotVersion=d.schemaVersion;
-          report.snapshotDate=d.updated;
-          // Controls are outside the missing-stock target; use only to compare API semantics.
-          const controlIds=[3629,3634,6220].filter(id=>!ids.includes(id));
-          report.controlIds=controlIds;
-          save();
-
-          let token=null, calls=0;
           async function login() {
             const e=process.env;
             if(!e.SABY_APP_ID||!e.SABY_APP_SECRET||!e.SABY_SECRET_KEY)
@@ -106,7 +65,7 @@ jobs:
             console.log('Saby authorization OK; token hidden');
           }
           async function get(path,params,label,encoding='repeat') {
-            if(++calls>350) throw Error('GET request budget exceeded');
+            if(++calls>24) throw Error('GET request budget exceeded');
             await sleep(2000); // previous 150 ms pacing caused bursts of HTTP 500
             const url=new URL(path,API);
             for(const [k,v] of Object.entries(params)) {
@@ -119,7 +78,6 @@ jobs:
             try {
               response=await fetch(url,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});
             }catch{throw Error('Network or timeout');}
-            report.requestCount=calls;
             console.log('GET '+calls+' '+label+': HTTP '+response.status);
             if(!response.ok) throw Error('HTTP '+response.status);
             try{return await response.json();}catch{throw Error('Invalid JSON');}
@@ -182,116 +140,45 @@ jobs:
             }
             return result;
           }
+          function reportResult(label, item, balancesById) {
+            const result = outcome(balancesById, item.id);
+            const comparison = item.photoBalance === undefined || result.balance === null
+              ? '' : '; matches photographed warehouse balance: '+(result.balance===item.photoBalance);
+            console.log(label+' '+item.label+': '+result.status+comparison);
+          }
+
           async function main() {
             await login();
             const points=rows(await get('point/list',{product:'retail',pageSize:100,page:0},'sales points'),['salesPoints'],['id']);
-            for(const store of stores) {
-              const matched=points.filter(p=>int(p.id)===store.pointId &&
-                (norm(p.name)===norm(store.name)||
-                (store.name==='Гаджиева'&&norm(p.name)==='гаджиево')));
-              if(matched.length!==1)throw Error('Store mapping changed: '+store.name);
+            if(points.filter(point=>int(point.id)===store.pointId && norm(point.name)===norm(store.name)).length!==1)
+              throw Error('Store mapping changed');
+
+            for(const item of cases) {
+              try {
+                reportResult('Direct',item,await direct(store,[item.id],item.label+' single ID'));
+              } catch(error) {
+                console.log('Direct '+item.label+': '+safeError(error));
+                process.exitCode=1;
+              }
             }
-            report.pointMappingsVerified=true;
-            // Warehouse/company mapping was confirmed in earlier read-only tests 72-74.
-            // These IDs are never used for a write, and this run does not assert re-verification.
-            report.warehouseMappingSource='Earlier tests 72-74 (not re-verified in this run)';
-            save();
-            const allIds=[...ids,...controlIds], batchSize=50;
-            for(const store of stores) {
-              const detail=new Map();
-              const entry={name:store.name,pointId:store.pointId,
-                companyId:store.companyId,warehouseId:store.warehouseId,
-                requestsOK:0,requestsFailed:0,items:[],counts:{positive:0,zero:0,negative:0,missing:0,invalid:0,error:0},
-                sampleSingleChecks:[]};
-              report.stores.push(entry);
-              for(let start=0;start<allIds.length;start+=batchSize) {
-                const asked=allIds.slice(start,start+batchSize);
-                try {
-                  const result=await direct(store,asked,store.name+' batch '+(1+Math.floor(start/batchSize)));
-                  for(const id of asked)detail.set(id,{id,...outcome(result,id),source:'batch'});
-                  entry.requestsOK++;
-                } catch(err) {
-                  entry.requestsFailed++;
-                  const reason=/^(HTTP [0-9]{3}|Network or timeout|Invalid JSON|Unexpected response structure|Unexpected or duplicated balance ID|GET request budget exceeded)$/.test(err.message)?err.message:'Unexpected API error';
-                  report.errors.push({store:store.name,batch:1+Math.floor(start/batchSize),reason});
-                  for(const id of asked)detail.set(id,{id,status:'error',balance:null,source:'batch'});
-                }
-              }
-              // Probe a few missing cells individually. A missing bulk row is NOT zero.
-              const toProbe=[3628,...ids].filter((id,i,a)=>a.indexOf(id)===i)
-                .filter(id=>detail.get(id)?.status==='missing').slice(0,3);
-              for(const id of toProbe) {
-                try {
-                  const single=await direct(store,[id],store.name+' single ID '+id);
-                  const x=outcome(single,id);
-                  entry.sampleSingleChecks.push({id,...x});
-                  if(x.status!=='missing'&&x.status!=='invalid')
-                    detail.set(id,{id,...x,source:'single',batchStatus:'missing'});
-                } catch(err) {
-                  entry.sampleSingleChecks.push({id,status:'error'});
-                  report.errors.push({store:store.name,id,reason:'Single-ID check failed'});
-                }
-              }
-              const targetIds=new Set(ids);
-              try{
-                entry.priceLists=await priceListIds(store);
-                const matches=new Map(), conflicts=new Set();
-                for(const listId of entry.priceLists){
-                  const values=await byPriceList(store,listId,targetIds);
-                  for(const [id,value] of values){
-                    if(value===null)continue;
-                    if(matches.has(id)&&matches.get(id)!==value)conflicts.add(id);
-                    matches.set(id,value);
-                  }
-                }
-                entry.priceListConflicts=[...conflicts];
-                for(const [id,value] of matches){
-                  if(conflicts.has(id))continue;
-                  const prior=detail.get(id);
-                  if(prior?.status!=='missing')continue;
-                  detail.set(id,{id,status:value>0?'positive':value===0?'zero':'negative',balance:value,source:'priceList'});
-                }
-              }catch(e){
-                report.errors.push({store:store.name,stage:'price lists',reason:String(e.message).slice(0,100)});
-              }
-              entry.items=ids.map(id=>detail.get(id));
-              for(const item of entry.items)entry.counts[item.status]++;
-              entry.controls=controlIds.map(id=>detail.get(id));
-              console.log(store.name+': '+JSON.stringify(entry.counts)+'; requests failed '+entry.requestsFailed);
-              save();
+
+            const ids = new Set(cases.map(item=>item.id));
+            const priceLists = await priceListIds(store);
+            console.log('Active price lists: '+priceLists.length);
+            for(const listId of priceLists) {
+              const values = await byPriceList(store,listId,ids);
+              for(const item of cases) reportResult('Price list '+listId,item,values);
             }
-            report.completed=true;
-            report.allRequestsSucceeded=report.errors.length===0;
-            report.finishedAt=new Date().toISOString();
-            report.totals={positive:0,zero:0,negative:0,missing:0,invalid:0,error:0};
-            for(const s of report.stores)for(const [k,v] of Object.entries(s.counts))report.totals[k]+=v;
-            report.note='Read-only Saby balances by product ID, company and warehouse. Missing rows are unknown.';
-            save();
-            console.log('Total target cells: '+(ids.length*stores.length));
-            console.log('Result totals: '+JSON.stringify(report.totals));
-            console.log('NO DATA PUBLISHED OR MODIFIED.');
-            if(report.errors.length) process.exitCode=1;
           }
-          main().catch(err=>{
-            report.fatal=/^(HTTP [0-9]{3}|Network or timeout|Invalid JSON|Unexpected response structure|Missing repository secrets|Authorization token missing|Authorization HTTP [0-9]{3}|GET request budget exceeded)$/.test(err.message)?err.message:'Diagnostics stopped (see validation stage)';
-            report.finishedAt=new Date().toISOString();save();
-            console.error(report.fatal);process.exitCode=1;
+
+          function safeError(error) {
+            const message = String(error?.message);
+            return /^(HTTP [0-9]{3}|Network or timeout|Invalid JSON|Unexpected response structure|Missing repository secrets|Authorization token missing|Authorization HTTP [0-9]{3}|GET request budget exceeded|Store mapping changed)$/.test(message)
+              ? message : 'Unexpected API response';
+          }
+
+          main().catch(error=>{
+            console.error('Diagnostics stopped: '+safeError(error));
+            process.exitCode=1;
           });
           JS
-
-      - name: Reconcile missing quantities and build a test catalog
-        run: node reconcile-stock.cjs diagnostic-90.json preview
-      - name: Upload updated test catalog and coverage summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: catalog-preview
-          path: preview
-          retention-days: 7
-      - name: Upload diagnostic report even on failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: diagnostic-90
-          path: diagnostic-90.json
-          if-no-files-found: warn
-          retention-days: 7
