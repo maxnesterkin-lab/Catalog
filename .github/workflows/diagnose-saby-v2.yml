@@ -163,6 +163,8 @@ jobs:
             }
 
             const ids = new Set(cases.map(item=>item.id));
+            const batch = await direct(store, [...ids], 'XROS warehouse batch');
+            for (const item of cases) reportResult('Batch', item, batch);
             const priceLists = await priceListIds(store);
             console.log('Active price lists: '+priceLists.length);
             for(const listId of priceLists) {
