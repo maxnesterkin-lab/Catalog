@@ -1,32 +1,24 @@
-name: Update Saby Retail Data
+name: Validate Saby stock by warehouse
 
-# Temporary maintenance mode: scheduled runs are disabled until validation.
 on:
+  push:
+    branches: [validate-saby-stock-by-warehouse]
+    paths: [.github/workflows/update-prices.yml]
   workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish data.json to main (leave unchecked for preview)'
-        type: boolean
-        required: true
-        default: false
 
 permissions:
-  contents: write
-
-concurrency:
-  group: saby-catalog-update-main
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   update-data:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/validate-saby-stock-by-warehouse'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -40,7 +32,6 @@ jobs:
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
           set -euo pipefail
-          git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
           node update-script.js
           node - <<'JS'
           const fs = require('node:fs');
@@ -63,35 +54,23 @@ jobs:
           console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
           JS
 
-      - name: Preview only - nothing published
-        if: ${{ !inputs.publish }}
-        run: echo 'Preview completed. data.json was not committed or pushed.'
-
-      - name: Commit and push if data changed
-        if: ${{ inputs.publish }}
-        shell: bash
+      - name: Check stock status consistency
         run: |
-          set -euo pipefail
-          base=$(cat "$RUNNER_TEMP/saby-base-sha")
-          if git diff --quiet HEAD -- data.json; then
-            echo 'No changes to data.json.'
-            exit 0
-          fi
-          cp data.json "$RUNNER_TEMP/saby-data-candidate.json"
-          git restore --source=HEAD --staged --worktree -- data.json
-          git fetch origin refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$base" origin/main; then
-            echo 'Main history changed during update. Publication blocked.'
-            exit 1
-          fi
-          if ! git diff --quiet "$base" origin/main -- data.json update-script.js .github/workflows/update-prices.yml; then
-            echo 'Data or update code changed during update. Publication blocked.'
-            exit 1
-          fi
-          git switch --detach origin/main
-          cp "$RUNNER_TEMP/saby-data-candidate.json" data.json
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- data.json
-          git commit -m 'Auto-update prices and stock from Saby API'
-          git push origin HEAD:refs/heads/main
+          node <<'JS'
+          const assert = require('node:assert/strict');
+          const data = require('./data.json');
+          const totals = {available:0,zero:0,negative:0,missing:0};
+          for (const category of data.categories) {
+            for (const product of category.items) {
+              for (const flavor of product.flavors) {
+                assert.equal(flavor.stockStatus.length, data.stores.length);
+                assert.deepEqual(flavor.stores, flavor.stockStatus.flatMap((status,i) => status === 'available' ? [i] : []));
+                for (const status of flavor.stockStatus) {
+                  assert(Object.hasOwn(totals,status));
+                  totals[status]++;
+                }
+              }
+            }
+          }
+          console.log('Validated stock status totals:', JSON.stringify(totals));
+          JS
