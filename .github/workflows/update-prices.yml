@@ -3,7 +3,7 @@ name: Validate Saby stock by warehouse
 on:
   push:
     branches: [validate-saby-stock-by-warehouse]
-    paths: [.github/workflows/update-prices.yml]
+    paths: [.github/workflows/update-prices.yml, update-script.js]
   workflow_dispatch:
 
 permissions:
