@@ -67,21 +67,27 @@ throw Error('API retry limit');
 }
 return {login,get,count:()=>requests};
 }
+class PaginationError extends Error {}
+
+function canRetryFolder(error) {
+  return error.status >= 500 || error instanceof PaginationError;
+}
+
 async function paged(api,params,size){
 const all=[];const seen=new Set();
 for(let page=0;page<3000;page++){
 const d=await api.get('v2/nomenclature/list',{...params,pageSize:size,page});
 const part=rows(d,'nomenclatures');
-for(const x of part){const k=(x.isParent?'F:':'P:')+key(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k)) throw Error('Duplicate row during pagination');seen.add(k);all.push(x);}
+for(const x of part){const k=(x.isParent?'F:':'P:')+key(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k)) throw new PaginationError('Duplicate row during pagination at page '+page+' (pageSize '+size+')');seen.add(k);all.push(x);}
 if(d?.outcome?.hasMore===false) return all;
-if(d?.outcome?.hasMore!==true||!part.length) throw Error('Uncertain pagination');
+if(d?.outcome?.hasMore!==true||!part.length) throw new PaginationError('Uncertain pagination at page '+page+' (pageSize '+size+')');
 }
 throw Error('Page budget exceeded');
 }
 async function folder(api, params){
 let err;
 for(const size of [100,30,10,3,1]){
-try{return await paged(api,params,size);}catch(e){err=e;if(!(e.status>=500))throw e;}
+try{return await paged(api,params,size);}catch(e){err=e;if(!canRetryFolder(e))throw e;}
 }
 throw err;
 }
@@ -142,8 +148,8 @@ let arr;
 try {
   arr=await folder(api,{folder:parent,withBalance:false});
 } catch (error) {
-  if (parent === null || !(error.status >= 500)) throw error;
-  log(`Catalog folder ${node.name} (ID ${parent}): HTTP ${error.status}${defer ? '; retry deferred' : '; still unread'}`);
+  if (parent === null || !canRetryFolder(error)) throw error;
+  log(`Catalog folder ${node.name} (ID ${parent}): ${error.message}${defer ? '; retry deferred' : '; still unread'}`);
   if (defer) deferredFolders.push({node,depth});
   return false;
 }
@@ -187,8 +193,8 @@ for (const [si, store] of stores.entries()) {
     try {
       results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
     } catch (error) {
-      if (!(error.status >= 500)) throw error;
-      log(`Stock ${store.name}, ${n.name}: HTTP ${error.status}; checking items by warehouse`);
+      if (!canRetryFolder(error)) throw error;
+      log(`Stock ${store.name}, ${n.name}: ${error.message}; checking items by warehouse`);
       results = [];
     }
     const mapped = new Map(results.filter(x => !x.isParent).map(x => [key(x.id),x]));
