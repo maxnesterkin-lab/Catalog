@@ -101,23 +101,25 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
     };
     let response;
     try {
-      response = await api.get('nomenclature/balances', params);
-    } catch (error) {
-      if (error.status === 400 || error.status === 422) {
+      try {
+        response = await api.get('nomenclature/balances', params);
+      } catch (error) {
+        if (error.status !== 400 && error.status !== 422) throw error;
         const jsonParams = Object.fromEntries(
           Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]),
         );
         response = await api.get('nomenclature/balances', jsonParams);
-      } else if (error.status >= 500 && leaves.length > 1) {
+      }
+    } catch (error) {
+      if (error.status >= 500 && leaves.length > 1) {
         const middle = Math.ceil(leaves.length / 2);
         log(`Warehouse ${store.name}: HTTP ${error.status}; splitting batch of ${leaves.length}`);
         await queryBatch(leaves.slice(0, middle));
         await queryBatch(leaves.slice(middle));
-        return;
       } else {
         log(`Warehouse ${store.name}: ${error.message}; ${leaves.length} balances remain unconfirmed`);
-        return;
       }
+      return;
     }
 
     const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
