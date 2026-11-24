@@ -32,10 +32,10 @@ jobs:
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
           set -euo pipefail
-          node update-script.js
+          node update-script.js stock-preview.json
           node - <<'JS'
           const fs = require('node:fs');
-          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+          const d = JSON.parse(fs.readFileSync('stock-preview.json', 'utf8'));
           if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
             throw new Error('Unexpected catalog structure; publication blocked');
           }
@@ -58,7 +58,7 @@ jobs:
         run: |
           node <<'JS'
           const assert = require('node:assert/strict');
-          const data = require('./data.json');
+          const data = require('./stock-preview.json');
           const totals = {available:0,zero:0,negative:0,missing:0};
           for (const category of data.categories) {
             for (const product of category.items) {
@@ -73,4 +73,5 @@ jobs:
             }
           }
           console.log('Validated stock status totals:', JSON.stringify(totals));
+          console.log('Unread catalog folders:', data.unreadFolders?.length ?? 0);
           JS
