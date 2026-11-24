@@ -92,9 +92,8 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!canRetryFolder(e))th
 throw err;
 }
 async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
-  const batchSize = 50;
-  for (let start = 0; start < missing.length; start += batchSize) {
-    const batch = new Map(missing.slice(start, start + batchSize).map(leaf => [leaf.id, leaf]));
+  async function queryBatch(leaves) {
+    const batch = new Map(leaves.map(leaf => [leaf.id, leaf]));
     const params = {
       nomenclatures: [...batch.keys()],
       warehouses: [store.warehouseId],
@@ -102,16 +101,25 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
     };
     let response;
     try {
-      response = await api.get('nomenclature/balances', params).catch(error => {
-        if (error.status !== 400 && error.status !== 422) throw error;
-        const jsonParams = Object.fromEntries(Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]));
-        return api.get('nomenclature/balances', jsonParams);
-      });
+      response = await api.get('nomenclature/balances', params);
     } catch (error) {
-      if (!(error.status >= 500)) throw error;
-      log(`Warehouse ${store.name}: HTTP ${error.status}; ${batch.size} balances remain unconfirmed`);
-      continue;
+      if (error.status === 400 || error.status === 422) {
+        const jsonParams = Object.fromEntries(
+          Object.entries(params).map(([name, values]) => [name, JSON.stringify(values)]),
+        );
+        response = await api.get('nomenclature/balances', jsonParams);
+      } else if (error.status >= 500 && leaves.length > 1) {
+        const middle = Math.ceil(leaves.length / 2);
+        log(`Warehouse ${store.name}: HTTP ${error.status}; splitting batch of ${leaves.length}`);
+        await queryBatch(leaves.slice(0, middle));
+        await queryBatch(leaves.slice(middle));
+        return;
+      } else {
+        log(`Warehouse ${store.name}: ${error.message}; ${leaves.length} balances remain unconfirmed`);
+        return;
+      }
     }
+
     const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
     const result = Array.isArray(response) ? response : response?.[fields.find(name => response?.[name] != null)];
     const records = result && typeof result === 'object'
@@ -125,6 +133,17 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
       seen.add(id);
       batch.get(id).stock[storeIndex] = numeric(record.balance);
     }
+    const unreturned = leaves.filter(leaf => !seen.has(leaf.id));
+    if (unreturned.length && leaves.length > 1) {
+      const middle = Math.ceil(unreturned.length / 2);
+      log(`Warehouse ${store.name}: ${unreturned.length} requested balances omitted; retrying smaller batches`);
+      await queryBatch(unreturned.slice(0, middle));
+      await queryBatch(unreturned.slice(middle));
+    }
+  }
+
+  for (let start = 0; start < missing.length; start += 50) {
+    await queryBatch(missing.slice(start, start + 50));
   }
 }
 
