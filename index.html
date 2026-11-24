@@ -82,7 +82,7 @@ function normalize(d) {
       name: c.name || "",
       items: (c.items || []).map(it => ({
         name: it.name || "", meta: it.meta || "", price: Number(it.price) || 0, color: it.color || "#9fd8ff",
-        flavors: (it.flavors || []).map(f => ({ name: f.name || "", stores: Array.isArray(f.stores) ? f.stores : [] }))
+        flavors: (it.flavors || []).map(f => ({ name: f.name || "", stores: Array.isArray(f.stores) ? f.stores : [], stockStatus: Array.isArray(f.stockStatus) ? f.stockStatus : [] }))
       }))
     }))
   };
@@ -166,6 +166,10 @@ function render() {
   syncBack();
 }
 
+function needsStockCheck(flavor, storeIndex) {
+  return ["missing", "negative"].includes(flavor.stockStatus[storeIndex]);
+}
+
 function renderList() {
   const cat = D.categories[S.cat], q = S.q.trim().toLowerCase(), out = [];
   cat.items.forEach((p, i) => {
@@ -174,17 +178,23 @@ function renderList() {
     const fHit = q ? all.filter(x => x.f.name.toLowerCase().includes(q)) : all;
     if (q && !nameHit && !fHit.length) return;
     const rows = (q && !nameHit) ? fHit : all;
-    const n = all.filter(x => x.here).length;
     const opened = S.open === i || (q && !nameHit);
-    const label = n ? `В наличии здесь: ${n} из ${all.length} вкусов` : "Нет в наличии здесь";
+    const checking = rows.some(({f}) => needsStockCheck(f, S.store));
+    const available = rows.filter(x => x.here).length;
+    const label = available ? `В наличии здесь: ${available} из ${rows.length}` :
+      checking ? "Наличие не подтверждено" : "Нет в наличии здесь";
     let body = `<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>`;
     if (opened) {
       body = '<div class="detail">' + rows.slice().sort((a, b) => b.here - a.here).map(({ f, here }) => {
         const others = D.stores.map((s, si) => si).filter(si => si !== S.store && f.stores.includes(si)).map(si => D.stores[si].name);
-        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${others.length ? "Есть ещё: " + esc(others.join(", ")) : "В других магазинах нет"}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${here ? "Есть здесь" : "Нет здесь"}</span></div>`;
+        const elsewhereUnknown = D.stores.some((_, i) => i !== S.store && needsStockCheck(f, i));
+        const otherLabel = others.length ? "Есть ещё: " + esc(others.join(", ")) :
+          elsewhereUnknown ? "В других магазинах наличие не подтверждено" : "В других магазинах нет";
+        const stockLabel = here ? "Есть здесь" : needsStockCheck(f, S.store) ? "Не подтверждено" : "Нет здесь";
+        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${otherLabel}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${stockLabel}</span></div>`;
       }).join("") + "</div>";
     }
-    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(" ")[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta ? `<div class="meta">${esc(p.meta)}</div>` : ""}${p.price ? `<div class="price">${p.price} ₽</div>` : ""}<div class="av ${n ? "ok" : "no"}">${label}</div></div></div>${body}</button>`);
+    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(" ")[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta ? `<div class="meta">${esc(p.meta)}</div>` : ""}${p.price ? `<div class="price">${p.price} ₽</div>` : ""}<div class="av ${available ? "ok" : "no"}">${label}</div></div></div>${body}</button>`);
   });
   $("list").innerHTML = out.length ? out.join("") : `<div class="empty">Ничего не найдено. Измените запрос.</div>`;
 }
