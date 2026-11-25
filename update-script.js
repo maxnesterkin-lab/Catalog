@@ -135,13 +135,8 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
       seen.add(id);
       batch.get(id).stock[storeIndex] = numeric(record.balance);
     }
-    const unreturned = leaves.filter(leaf => !seen.has(leaf.id));
-    if (unreturned.length && leaves.length > 1) {
-      const middle = Math.ceil(unreturned.length / 2);
-      log(`Warehouse ${store.name}: ${unreturned.length} requested balances omitted; retrying smaller batches`);
-      await queryBatch(unreturned.slice(0, middle));
-      await queryBatch(unreturned.slice(middle));
-    }
+    // Saby may omit products without a balance record. Do not fan out into
+    // thousands of individual requests or treat an omitted row as confirmed zero.
   }
 
   for (let start = 0; start < missing.length; start += 50) {
