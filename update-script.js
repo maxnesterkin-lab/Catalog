@@ -43,7 +43,7 @@ const r=await fetcher('https://online.sbis.ru/oauth/service/',{method:'POST',hea
 if(!r.ok) throw Error('Authorization HTTP '+r.status);
 const d=await r.json(); token=d.token||d.access_token; if(typeof token!=='string'||!token) throw Error('Missing access token');
 }
-async function get(path, params){
+async function get(path, params, {maxAttempts=4}={}){
 const u = new URL(path, BASE);
 for (const [name, value] of Object.entries(params)) {
   if (Array.isArray(value)) {
@@ -53,14 +53,14 @@ for (const [name, value] of Object.entries(params)) {
   }
 }
 let relogged=false;
-for(let a=1;a<=4;a++){
+for(let a=1;a<=maxAttempts;a++){
 if(++requests>12000) throw Error('Request budget exceeded');
 await pause(path === 'nomenclature/balances' ? 1500 : 450);
 let r;
-try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===4) throw Error('Network/timeout'); await pause(1000*a);continue;}
+try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===maxAttempts) throw Error('Network/timeout'); await pause(1000*a);continue;}
 if(r.ok) return r.json();
 if(r.status===401&&!relogged){await login();relogged=true;a--;continue;}
-if((r.status===429||r.status>=500)&&a<4){const raw=r.headers.get('retry-after');const seconds=Number(raw);if(seconds>60) throw Error('Retry-after exceeds limit');await pause(Math.max(a*1000,Number.isFinite(seconds)?seconds*1000:0));continue;}
+if((r.status===429||r.status>=500)&&a<maxAttempts){const raw=r.headers.get('retry-after');const seconds=Number(raw);if(seconds>60) throw Error('Retry-after exceeds limit');await pause(Math.max(a*1000,Number.isFinite(seconds)?seconds*1000:0));continue;}
 const e=Error('HTTP '+r.status+' at '+path+' page='+params.page+' pageSize='+params.pageSize+' scope='+(params.folder==null?'root':'folder'));e.status=r.status;throw e;
 }
 throw Error('API retry limit');
@@ -73,10 +73,10 @@ function canRetryFolder(error) {
   return error.status >= 500 || error instanceof PaginationError;
 }
 
-async function paged(api,params,size){
+async function paged(api,params,size,options){
 const all=[];const seen=new Set();
 for(let page=0;page<3000;page++){
-const d=await api.get('v2/nomenclature/list',{...params,pageSize:size,page});
+const d=await api.get('v2/nomenclature/list',{...params,pageSize:size,page},options);
 const part=rows(d,'nomenclatures');
 for(const x of part){const k=(x.isParent?'F:':'P:')+key(x.isParent?(x.hierarchicalId??x.id):x.id);if(seen.has(k)) throw new PaginationError('Duplicate row during pagination at page '+page+' (pageSize '+size+')');seen.add(k);all.push(x);}
 if(d?.outcome?.hasMore===false) return all;
@@ -144,7 +144,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
   }
 }
 
-async function sync(api,prev,log=console.log,{allowIncompletePreview=false}={}){
+async function sync(api,prev,log=console.log,{allowIncompletePreview=false,onStoreComplete=()=>{}}={}){
 await api.login();
 const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
 const stores=STORE_ORDER.map(name=>{
@@ -202,16 +202,22 @@ function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gat
 roots.forEach(gather);
 if(!ids.size)throw Error('Empty global catalog');
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
+const warehouseOnly = new Set();
 for (const [si, store] of stores.entries()) {
   const missing = [];
   for (const n of leafFolders) {
-    let results;
-    try {
-      results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
-    } catch (error) {
-      if (!canRetryFolder(error)) throw error;
-      log(`Stock ${store.name}, ${n.name}: ${error.message}; checking items by warehouse`);
-      results = [];
+    let results = [];
+    if (!warehouseOnly.has(n.hid)) {
+      const params = {pointId:store.id, folder:n.hid, withBalance:true};
+      try {
+        results = allowIncompletePreview
+          ? await paged(api, params, 100, {maxAttempts:2})
+          : await folder(api, params);
+      } catch (error) {
+        if (!canRetryFolder(error)) throw error;
+        if (allowIncompletePreview && error.status === 500) warehouseOnly.add(n.hid);
+        log(`Stock ${store.name}, ${n.name}: ${error.message}; checking items by warehouse`);
+      }
     }
     const mapped = new Map(results.filter(x => !x.isParent).map(x => [key(x.id),x]));
     for (const leaf of n.leaves) {
@@ -224,6 +230,7 @@ for (const [si, store] of stores.entries()) {
   await fillWarehouseBalances(api, store, missing, si, log);
   const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
   const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
+  onStoreComplete({store:store.name, checked:ids.size, warehouseResolved:missing.length-unresolved, unknown:unresolved, negative:negatives, requests:api.count()});
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
 const categories=[];let total=0;
@@ -261,15 +268,23 @@ const started=Date.now();const prev=JSON.parse(fs.readFileSync('data.json','utf8
 if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores))throw Error('Unexpected current data.json format');
 const api=client(process.env);
 const previewPath=process.argv[2];
-const content=await sync(api,prev,console.log,{allowIncompletePreview:Boolean(previewPath)});
+const progress = {started:new Date(started).toISOString(), totalStores:STORE_ORDER.length, completedStores:[]};
+function onStoreComplete(store) {
+  progress.completedStores.push(store);
+  const path = previewPath + '.progress.json';
+  fs.writeFileSync(path + '.tmp', JSON.stringify(progress, null, 2));
+  fs.renameSync(path + '.tmp', path);
+}
 if (previewPath) {
   if (require('node:path').resolve(previewPath) === require('node:path').resolve('data.json')) {
     throw Error('Preview must use a separate output path');
   }
+  const content=await sync(api,prev,console.log,{allowIncompletePreview:true,onStoreComplete});
   fs.writeFileSync(previewPath,JSON.stringify({updated:new Date().toISOString(),...content}));
   console.log(`Preview written; unread folders=${content.unreadFolders?.length ?? 0}; requests=${api.count()}`);
   return;
 }
+const content=await sync(api,prev);
 if(JSON.stringify(content)===JSON.stringify({stores:prev.stores,categories:prev.categories}))console.log('No changes.');
 else {const tmp='data.json.saby.tmp';fs.writeFileSync(tmp,JSON.stringify({updated:new Date().toISOString(),...content}));fs.renameSync(tmp,'data.json');console.log('Candidate data.json generated locally.');}
 console.log(`Completed in ${Math.round((Date.now()-started)/1000)} s; requests=${api.count()}`);

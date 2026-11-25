@@ -34,17 +34,25 @@ jobs:
           node-version: '22'
 
       - name: Run script to fetch data from Saby
+        timeout-minutes: ${{ inputs.publish && 180 || 170 }}
         env:
+          PUBLISH: ${{ inputs.publish }}
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
           set -euo pipefail
           git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
-          node update-script.js
-          node - <<'JS'
+          if [[ "$PUBLISH" == 'true' ]]; then
+            candidate=data.json
+            node update-script.js
+          else
+            candidate="$RUNNER_TEMP/saby-preview.json"
+            node update-script.js "$candidate"
+          fi
+          node - "$candidate" <<'JS'
           const fs = require('node:fs');
-          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
             throw new Error('Unexpected catalog structure; publication blocked');
           }
@@ -63,9 +71,38 @@ jobs:
           console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
           JS
 
-      - name: Preview only - nothing published
-        if: ${{ !inputs.publish }}
-        run: echo 'Preview completed. data.json was not committed or pushed.'
+      - name: Summarize completed stores
+        if: ${{ always() && !inputs.publish }}
+        run: |
+          node - <<'JS' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const path = process.env.RUNNER_TEMP + '/saby-preview.json';
+          const progress = path + '.progress.json';
+          if (!fs.existsSync(progress)) {
+            console.log('Проверка не завершила ни одного магазина.');
+            process.exit(0);
+          }
+          const {completedStores, totalStores} = JSON.parse(fs.readFileSync(progress));
+          console.log(`Проверено магазинов: ${completedStores.length} из ${totalStores}.`);
+          if (!fs.existsSync(path)) console.log('Полная выгрузка не сформирована.');
+          else {
+            const preview = JSON.parse(fs.readFileSync(path));
+            console.log(`Непрочитанных папок каталога: ${preview.unreadFolders?.length ?? 0}.`);
+          }
+          console.log('\n| Магазин | Проверено | Остаток неизвестен | Отрицательный остаток |');
+          console.log('|---|---:|---:|---:|');
+          for (const s of completedStores) console.log(`| ${s.store} | ${s.checked} | ${s.unknown} | ${s.negative} |`);
+          JS
+
+      - name: Save preview and store progress
+        if: ${{ always() && !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: saby-preview-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/saby-preview.json
+            ${{ runner.temp }}/saby-preview.json.progress.json
+          if-no-files-found: warn
 
       - name: Commit and push if data changed
         if: ${{ inputs.publish }}
