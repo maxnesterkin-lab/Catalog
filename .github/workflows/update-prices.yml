@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   update-data:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || !inputs.publish
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: ${{ inputs.publish && 180 || 340 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,7 +34,7 @@ jobs:
           node-version: '22'
 
       - name: Run script to fetch data from Saby
-        timeout-minutes: ${{ inputs.publish && 180 || 170 }}
+        timeout-minutes: ${{ inputs.publish && 180 || 330 }}
         env:
           PUBLISH: ${{ inputs.publish }}
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
@@ -89,9 +89,9 @@ jobs:
             const preview = JSON.parse(fs.readFileSync(path));
             console.log(`Непрочитанных папок каталога: ${preview.unreadFolders?.length ?? 0}.`);
           }
-          console.log('\n| Магазин | Проверено | Остаток неизвестен | Отрицательный остаток |');
-          console.log('|---|---:|---:|---:|');
-          for (const s of completedStores) console.log(`| ${s.store} | ${s.checked} | ${s.unknown} | ${s.negative} |`);
+          console.log('\n| Магазин | available | zero | negative | absent | missing | Подтверждено складом |');
+          console.log('|---|---:|---:|---:|---:|---:|---:|');
+          for (const s of completedStores) console.log(`| ${s.store} | ${s.available} | ${s.zero} | ${s.negative} | ${s.absent} | ${s.missing} | ${s.warehouseResolved} |`);
           JS
 
       - name: Save preview and store progress
@@ -102,10 +102,11 @@ jobs:
           path: |
             ${{ runner.temp }}/saby-preview.json
             ${{ runner.temp }}/saby-preview.json.progress.json
+            ${{ runner.temp }}/gadzhieva.csv
           if-no-files-found: warn
 
       - name: Commit and push if data changed
-        if: ${{ inputs.publish }}
+        if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
           set -euo pipefail

@@ -54,10 +54,10 @@ for (const [name, value] of Object.entries(params)) {
 }
 let relogged=false;
 for(let a=1;a<=maxAttempts;a++){
-if(++requests>12000) throw Error('Request budget exceeded');
+if(++requests>12000) throw new RequestBudgetError('Request budget exceeded');
 await pause(path === 'nomenclature/balances' ? 1500 : 450);
 let r;
-try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===maxAttempts) throw Error('Network/timeout'); await pause(1000*a);continue;}
+try {r=await fetcher(u,{headers:{'X-SBISAccessToken':token},redirect:'error',signal:AbortSignal.timeout(20000)});} catch {if(a===maxAttempts) throw new RequestTimeoutError('Network/timeout'); await pause(1000*a);continue;}
 if(r.ok) return r.json();
 if(r.status===401&&!relogged){await login();relogged=true;a--;continue;}
 if((r.status===429||r.status>=500)&&a<maxAttempts){const raw=r.headers.get('retry-after');const seconds=Number(raw);if(seconds>60) throw Error('Retry-after exceeds limit');await pause(Math.max(a*1000,Number.isFinite(seconds)?seconds*1000:0));continue;}
@@ -68,6 +68,15 @@ throw Error('API retry limit');
 return {login,get,count:()=>requests};
 }
 class PaginationError extends Error {}
+class RequestTimeoutError extends Error {}
+class RequestBudgetError extends Error {}
+
+function stockStatus(value) {
+  if (value === null) return 'missing';
+  if (value === 'absent') return 'absent';
+  if (value < 0) return 'negative';
+  return value === 0 ? 'zero' : 'available';
+}
 
 function canRetryFolder(error) {
   return error.status >= 500 || error instanceof PaginationError;
@@ -91,7 +100,8 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!canRetryFolder(e))th
 }
 throw err;
 }
-async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
+async function fillWarehouseBalances(api, store, missing, storeIndex, log, preview) {
+  let confirmed = 0;
   async function queryBatch(leaves) {
     const batch = new Map(leaves.map(leaf => [leaf.id, leaf]));
     const params = {
@@ -111,12 +121,14 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
         response = await api.get('nomenclature/balances', jsonParams);
       }
     } catch (error) {
+      if (error instanceof RequestBudgetError) throw error;
       if (error.status >= 500 && leaves.length > 1) {
         const middle = Math.ceil(leaves.length / 2);
         log(`Warehouse ${store.name}: HTTP ${error.status}; splitting batch of ${leaves.length}`);
         await queryBatch(leaves.slice(0, middle));
         await queryBatch(leaves.slice(middle));
       } else {
+        for (const leaf of leaves) leaf.stock[storeIndex] = null;
         log(`Warehouse ${store.name}: ${error.message}; ${leaves.length} balances remain unconfirmed`);
       }
       return;
@@ -133,15 +145,25 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
       const id = key(record?.nomenclature);
       if (!batch.has(id) || seen.has(id)) throw Error('Unexpected or repeated warehouse item for '+store.name);
       seen.add(id);
-      batch.get(id).stock[storeIndex] = numeric(record.balance);
+      const balance = numeric(record.balance);
+      batch.get(id).stock[storeIndex] = balance;
+      if (balance !== null) confirmed++;
     }
-    // Saby may omit products without a balance record. Do not fan out into
-    // thousands of individual requests or treat an omitted row as confirmed zero.
+    // An omitted row is evidence only after a successful, complete response.
+    if (preview && response?.outcome?.hasMore === true) {
+      throw Error('Incomplete warehouse balance response for '+store.name);
+    }
+    if (preview) {
+      for (const [id, leaf] of batch) {
+        if (!seen.has(id)) leaf.stock[storeIndex] = 'absent';
+      }
+    }
   }
 
   for (let start = 0; start < missing.length; start += 50) {
     await queryBatch(missing.slice(start, start + 50));
   }
+  return confirmed;
 }
 
 async function sync(api,prev,log=console.log,{allowIncompletePreview=false,onStoreComplete=()=>{}}={}){
@@ -203,10 +225,11 @@ roots.forEach(gather);
 if(!ids.size)throw Error('Empty global catalog');
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
 const warehouseOnly = new Set();
+const lastFailedStore = new Map();
 for (const [si, store] of stores.entries()) {
   const missing = [];
   for (const n of leafFolders) {
-    let results = [];
+    let results = null;
     if (!warehouseOnly.has(n.hid)) {
       const params = {pointId:store.id, folder:n.hid, withBalance:true};
       try {
@@ -214,24 +237,37 @@ for (const [si, store] of stores.entries()) {
           ? await paged(api, params, 100, {maxAttempts:2})
           : await folder(api, params);
       } catch (error) {
-        if (!canRetryFolder(error)) throw error;
-        if (allowIncompletePreview && error.status === 500) warehouseOnly.add(n.hid);
+        if (!canRetryFolder(error) && !(allowIncompletePreview && error instanceof RequestTimeoutError)) throw error;
+        if (allowIncompletePreview && (error.status === 500 || error instanceof PaginationError)) {
+          if (lastFailedStore.get(n.hid) === si - 1) warehouseOnly.add(n.hid);
+          lastFailedStore.set(n.hid, si);
+        }
         log(`Stock ${store.name}, ${n.name}: ${error.message}; checking items by warehouse`);
       }
     }
-    const mapped = new Map(results.filter(x => !x.isParent).map(x => [key(x.id),x]));
+    const mapped = new Map((results ?? []).filter(x => !x.isParent).map(x => [key(x.id),x]));
     for (const leaf of n.leaves) {
       const row = mapped.get(leaf.id);
-      leaf.stock[si] = numeric(row?.balance);
+      const balance = numeric(row?.balance);
+      leaf.stock[si] = allowIncompletePreview && results !== null && !row ? 'absent' : balance;
       leaf.pointCosts[si] = numeric(row?.cost);
-      if (leaf.stock[si] === null) missing.push(leaf);
+      if (balance === null) missing.push(leaf);
     }
   }
-  await fillWarehouseBalances(api, store, missing, si, log);
-  const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
-  const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
-  onStoreComplete({store:store.name, checked:ids.size, warehouseResolved:missing.length-unresolved, unknown:unresolved, negative:negatives, requests:api.count()});
-  log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
+  const warehouseResolved = await fillWarehouseBalances(api, store, missing, si, log, allowIncompletePreview);
+  const counts = {available:0, zero:0, negative:0, absent:0, missing:0};
+  const shelfCheck = [];
+  for (const n of leafFolders) {
+    for (const leaf of n.leaves) {
+      const status = stockStatus(leaf.stock[si]);
+      counts[status]++;
+      if (allowIncompletePreview && store.name === 'Гаджиева' && (status === 'absent' || status === 'missing')) {
+        shelfCheck.push([leaf.name, n.name, status]);
+      }
+    }
+  }
+  onStoreComplete({store:store.name, ...counts, warehouseResolved, requests:api.count()}, shelfCheck);
+  log(`Stock ${store.name}: ${JSON.stringify(counts)}; warehouse confirmed=${warehouseResolved}; requests=${api.count()}`);
 }
 const categories=[];let total=0;
 for(const root of roots.slice().sort(byName)){
@@ -244,7 +280,7 @@ if(prices.some(p=>p===null))throw Error('Missing valid prices in '+n.name);
 const flavors = leaves.map(leaf => ({
   name: clean(leaf.name,n.name),
   stores: leaf.stock.flatMap((value,index) => value > 0 ? [index] : []),
-  stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),
+  stockStatus: leaf.stock.map(stockStatus),
 }));
 items.push({name:n.name,meta:'',price:Math.min(...prices),color:colorFor(n.name),flavors});total+=flavors.length;
 }
@@ -269,7 +305,17 @@ if(!Array.isArray(prev.categories)||!Array.isArray(prev.stores))throw Error('Une
 const api=client(process.env);
 const previewPath=process.argv[2];
 const progress = {started:new Date(started).toISOString(), totalStores:STORE_ORDER.length, completedStores:[]};
-function onStoreComplete(store) {
+function onStoreComplete(store, shelfCheck) {
+  if (store.store === 'Гаджиева') {
+    const path = require('node:path').join(require('node:path').dirname(previewPath), 'gadzhieva.csv');
+    const lines = [['Название','Папка','Статус'], ...shelfCheck];
+    const escape = value => {
+      const text = /^[=+@\-\t\r]/.test(value) ? "'" + value : value;
+      return '"' + text.replaceAll('"','""') + '"';
+    };
+    fs.writeFileSync(path + '.tmp', '\uFEFF' + lines.map(line => line.map(escape).join(',')).join('\r\n') + '\r\n');
+    fs.renameSync(path + '.tmp', path);
+  }
   progress.completedStores.push(store);
   const path = previewPath + '.progress.json';
   fs.writeFileSync(path + '.tmp', JSON.stringify(progress, null, 2));
