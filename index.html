@@ -74,9 +74,23 @@ const BACK = { cats: "stores", list: "cats" };
 function normalize(d) {
   const stores = (d.stores || []).map(s => typeof s === "string" ? { name: s } : { name: s.name, hours: s.hours });
   const categories = Array.isArray(d.categories) ? d.categories : [];
+  for (const category of categories) {
+    for (const item of category.items) {
+      for (const flavor of item.flavors) {
+        const states = flavor.stockStatus;
+        if (!Array.isArray(states) || states.length !== stores.length ||
+            !Array.isArray(flavor.stores) ||
+            !states.every((state, i) => ["available", "zero", "negative"].includes(state) &&
+              (state === "available") === flavor.stores.includes(i))) {
+          throw new Error("Incomplete stock data");
+        }
+      }
+    }
+  }
   return {
     stores,
     updated: d.updated || "",
+    stockReportDate: d.stockReportDate || "",
     addr: d.addr || {},
     categories: categories.map(c => ({
       name: c.name || "",
@@ -130,7 +144,11 @@ function fmtDate(iso) {
   catch (e) { return iso; }
 }
 function foot() {
-  return `<p class="demo">${D.updated ? "Данные обновлены: " + esc(fmtDate(D.updated)) + ". Наличие уточняйте в магазине." : "Концепт · цены и наличие — демо-данные"}</p>`;
+  if (D.stockReportDate) {
+    const date = D.stockReportDate.split("-").reverse().join(".");
+    return `<p class="demo">Остатки на вечер ${esc(date)}</p>`;
+  }
+  return D.updated ? `<p class="demo">Остатки на ${esc(fmtDate(D.updated))}</p>` : "";
 }
 
 function render() {
@@ -166,9 +184,6 @@ function render() {
   syncBack();
 }
 
-function needsStockCheck(flavor, storeIndex) {
-  return ["missing", "negative"].includes(flavor.stockStatus[storeIndex]);
-}
 
 function renderList() {
   const cat = D.categories[S.cat], q = S.q.trim().toLowerCase(), out = [];
@@ -179,18 +194,14 @@ function renderList() {
     if (q && !nameHit && !fHit.length) return;
     const rows = (q && !nameHit) ? fHit : all;
     const opened = S.open === i || (q && !nameHit);
-    const checking = rows.some(({f}) => needsStockCheck(f, S.store));
     const available = rows.filter(x => x.here).length;
-    const label = available ? `В наличии здесь: ${available} из ${rows.length}` :
-      checking ? "Наличие не подтверждено" : "Нет в наличии здесь";
+    const label = available ? "Есть в наличии" : "Нет в наличии";
     let body = `<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>`;
     if (opened) {
       body = '<div class="detail">' + rows.slice().sort((a, b) => b.here - a.here).map(({ f, here }) => {
         const others = D.stores.map((s, si) => si).filter(si => si !== S.store && f.stores.includes(si)).map(si => D.stores[si].name);
-        const elsewhereUnknown = D.stores.some((_, i) => i !== S.store && needsStockCheck(f, i));
-        const otherLabel = others.length ? "Есть ещё: " + esc(others.join(", ")) :
-          elsewhereUnknown ? "В других магазинах наличие не подтверждено" : "В других магазинах нет";
-        const stockLabel = here ? "Есть здесь" : needsStockCheck(f, S.store) ? "Не подтверждено" : "Нет здесь";
+        const otherLabel = others.length ? "Есть ещё: " + esc(others.join(", ")) : "В других магазинах нет";
+        const stockLabel = here ? "Есть в наличии" : "Нет в наличии";
         return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${otherLabel}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${stockLabel}</span></div>`;
       }).join("") + "</div>";
     }

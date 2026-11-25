@@ -22,7 +22,11 @@ const sort = new Intl.Collator('ru');
 const byName = (a,b) => sort.compare(a.name,b.name) || String(a.id ?? a.hid).localeCompare(String(b.id ?? b.hid));
 const normalize = x => String(x ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
-const numeric = v => (v == null || String(v).trim()==='' || typeof v==='boolean' || !Number.isFinite(Number(v))) ? null : Number(v);
+const numeric = v => {
+  if (typeof v !== 'number' && (typeof v !== 'string' || !v.trim())) return null;
+  const number = Number(v);
+  return Number.isFinite(number) ? number : null;
+};
 const key = v => {if (v==null || String(v).trim()==='') throw Error('Missing Saby ID'); return String(v);};
 const colorFor = name => {let h=0; for(const c of name) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length];};
 function clean(name, folder) {const f=name.trim(); if(f.toLowerCase().startsWith(folder.toLowerCase())) return f.slice(folder.length).replace(/^[\s\-–—:,/]+/,'').trim()||f; return f;}
@@ -122,6 +126,9 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
       return;
     }
 
+    if (response?.outcome?.hasMore === true) {
+      throw Error('Incomplete warehouse balance response for '+store.name);
+    }
     const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
     const result = Array.isArray(response) ? response : response?.[fields.find(name => response?.[name] != null)];
     const records = result && typeof result === 'object'
@@ -223,6 +230,9 @@ for (const [si, store] of stores.entries()) {
   }
   await fillWarehouseBalances(api, store, missing, si, log);
   const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
+  if (unresolved && !allowIncompletePreview) {
+    throw Error(`Missing balances for ${unresolved} positions in ${store.name}; publication blocked`);
+  }
   const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
