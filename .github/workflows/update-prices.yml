@@ -21,7 +21,7 @@ jobs:
   update-data:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 345
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,16 +35,23 @@ jobs:
 
       - name: Run script to fetch data from Saby
         env:
+          PUBLISH: ${{ inputs.publish }}
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
         run: |
           set -euo pipefail
           git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
-          node update-script.js
-          node - <<'JS'
+          if [[ "$PUBLISH" == 'true' ]]; then
+            candidate=data.json
+            node update-script.js
+          else
+            candidate="$RUNNER_TEMP/saby-preview.json"
+            node update-script.js "$candidate"
+          fi
+          node - "$candidate" <<'JS'
           const fs = require('node:fs');
-          const d = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
             throw new Error('Unexpected catalog structure; publication blocked');
           }
@@ -63,9 +70,13 @@ jobs:
           console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
           JS
 
-      - name: Preview only - nothing published
+      - name: Save preview
         if: ${{ !inputs.publish }}
-        run: echo 'Preview completed. data.json was not committed or pushed.'
+        uses: actions/upload-artifact@v4
+        with:
+          name: saby-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/saby-preview.json
+          if-no-files-found: error
 
       - name: Commit and push if data changed
         if: ${{ inputs.publish }}
