@@ -149,7 +149,14 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
 
 async function sync(api,prev,log=console.log,{allowIncompletePreview=false}={}){
 await api.login();
-const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
+let points;
+try {
+  points=rows(await api.get('point/list',{product:'retail',page:0,pageSize:100}),'salesPoints');
+} catch (error) {
+  if (!allowIncompletePreview || !(error.status >= 500)) throw error;
+  log('Sales point directory unavailable; using configured point and warehouse IDs');
+  points=STORE_ORDER.map(name=>({name,id:WAREHOUSES.get(name).pointId}));
+}
 const stores=STORE_ORDER.map(name=>{
 const target=normalize(name);const matches=points.filter(p=>normalize(p.name)===target||(target==='гаджиева'&&normalize(p.name)==='гаджиево'));
 if(matches.length!==1) throw Error('Sales point not unique: '+name);
