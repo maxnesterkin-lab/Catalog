@@ -1,7 +1,9 @@
 name: Update Saby Retail Data
 
-# Temporary maintenance mode: scheduled runs are disabled until validation.
 on:
+  schedule:
+    # 00:20, 08:20 and 16:20 Moscow time.
+    - cron: '20 5,13,21 * * *'
   workflow_dispatch:
     inputs:
       publish:
@@ -12,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 concurrency:
   group: saby-catalog-update-main
@@ -26,6 +29,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -35,7 +39,7 @@ jobs:
 
       - name: Run script to fetch data from Saby
         env:
-          PUBLISH: ${{ inputs.publish }}
+          PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
@@ -71,7 +75,7 @@ jobs:
           JS
 
       - name: Save preview
-        if: ${{ !inputs.publish }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
         uses: actions/upload-artifact@v4
         with:
           name: saby-preview-${{ github.run_id }}-${{ github.run_attempt }}
@@ -79,7 +83,7 @@ jobs:
           if-no-files-found: error
 
       - name: Commit and push if data changed
-        if: ${{ inputs.publish }}
+        if: ${{ github.event_name == 'schedule' || inputs.publish }}
         shell: bash
         run: |
           set -euo pipefail
@@ -95,7 +99,7 @@ jobs:
             echo 'Main history changed during update. Publication blocked.'
             exit 1
           fi
-          if ! git diff --quiet "$base" origin/main -- data.json update-script.js .github/workflows/update-prices.yml; then
+          if ! git diff --quiet "$base" origin/main -- data.json update-script.js catalog-assortment.js .github/workflows/update-prices.yml; then
             echo 'Data or update code changed during update. Publication blocked.'
             exit 1
           fi
@@ -106,3 +110,31 @@ jobs:
           git add -- data.json
           git commit -m 'Auto-update prices and stock from Saby API'
           git push origin HEAD:refs/heads/main
+
+      - name: Publish the current catalog on GitHub Pages
+        if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          expected=$(git rev-parse origin/main:data.json)
+          site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url')
+          live_hash() {
+            curl --fail --silent --show-error --location --max-time 25 \
+              "${site%/}/data.json?revision=$expected&attempt=$1" | git hash-object --stdin
+          }
+          if [[ "$(live_hash 0)" == "$expected" ]]; then
+            echo "Catalog is already published."
+            exit 0
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent
+          for attempt in {1..30}; do
+            sleep 15
+            if [[ "$(live_hash "$attempt")" == "$expected" ]]; then
+              echo "Verified published data.json."
+              exit 0
+            fi
+          done
+          echo "Pages did not serve the expected catalog within the verification window."
+          exit 1

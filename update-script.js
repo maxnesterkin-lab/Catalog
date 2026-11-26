@@ -16,7 +16,7 @@ const WAREHOUSES = new Map([
   ['Североморск', {pointId:18093, warehouseId:18095, companyId:17792}],
 ]);
 const STORE_ORDER = [...WAREHOUSES.keys()];
-const EXCLUDE_ROOTS = ['вывод из ассортимента'];
+const {excludedFolder, planAssortment, appendNewVariants} = require('./catalog-assortment');
 const normalize = x => String(x ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const numeric = v => {
@@ -176,9 +176,9 @@ const {children,leaves}=node;
 for(const x of arr){
 const name=String(x.name??'').trim(); if(!name) throw Error('Unnamed catalog row');
 if(x.isParent){
-if(parent===null&&EXCLUDE_ROOTS.includes(normalize(name)))continue;
+if(excludedFolder(name, parent===null))continue;
 const hid=key(x.hierarchicalId??x.id);if(nodes.has(hid))throw Error('Duplicate catalog folder');nodes.add(hid);
-const child={name,hid,children:[],leaves:[]};
+const child={name,hid,department:node.department || name,children:[],leaves:[]};
 children.push(child);
 await walk(child,depth+1);
 } else {
@@ -196,24 +196,35 @@ for (const {node,depth} of deferredFolders) {
   if (!await walk(node,depth,false)) unreadFolders.push(node);
 }
 const roots=root.children;
-if (unreadFolders.length && !allowIncompletePreview) {
-  throw Error(`Saby did not return ${unreadFolders.length} catalog folders; publication blocked`);
-}
-if (unreadFolders.length) log(`Incomplete catalog preview: ${unreadFolders.length} unread folders`);
+if (unreadFolders.length) log(`Catalog discovery: ${unreadFolders.length} unread folders; existing IDs will still be checked by warehouse`);
 let leafFolders=[];
 function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gather);}
 roots.forEach(gather);
 if(!ids.size)throw Error('Empty global catalog');
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
 if (JSON.stringify(prev.stores) !== JSON.stringify(stores.map(s => s.name))) throw Error('Store order changed');
-const publishedIds = new Set(prev.categories.flatMap(c => c.items.flatMap(p => p.flavors.map(f => key(f.id)))));
-leafFolders = leafFolders.map(n => ({...n, leaves:n.leaves.filter(f => publishedIds.has(f.id))})).filter(n => n.leaves.length);
+const workingCategories = structuredClone(prev.categories);
+const additions = planAssortment(workingCategories, leafFolders);
+leafFolders = leafFolders.filter(folder => folder.leaves.length);
+const byId = new Map(leafFolders.flatMap(folder => folder.leaves.map(leaf => [leaf.id, leaf])));
+const warehouseOnly = [];
+for (const category of workingCategories) {
+  for (const group of category.items) {
+    for (const variant of group.flavors) {
+      const id = key(variant.id);
+      if (byId.has(id)) continue;
+      const leaf = {id, cost:null, stock:Array(stores.length).fill(null), pointCosts:Array(stores.length).fill(null)};
+      warehouseOnly.push(leaf);
+      byId.set(id, leaf);
+    }
+  }
+}
 for (const [si, store] of stores.entries()) {
-  const missing = [];
+  const missing = [...warehouseOnly];
   for (const n of leafFolders) {
     let results;
     try {
-      results = await folder(api, {pointId:store.id,folder:n.hid,withBalance:true});
+      results = await paged(api, {pointId:store.id,folder:n.hid,withBalance:true}, 100);
     } catch (error) {
       if (!canRetryFolder(error)) throw error;
       log(`Stock ${store.name}, ${n.name}: ${error.message}; checking items by warehouse`);
@@ -232,16 +243,12 @@ for (const [si, store] of stores.entries()) {
   const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
-const byId = new Map(leafFolders.flatMap(folder => folder.leaves.map(leaf => [leaf.id, leaf])));
-const categories = prev.categories.map(category => ({
+appendNewVariants(additions, log);
+const categories = workingCategories.map(category => ({
   ...category,
   items: category.items.map(group => {
     const flavors = group.flavors.map(previous => {
       const leaf = byId.get(key(previous.id));
-      if (!leaf) {
-        if (!allowIncompletePreview) throw Error('Published product missing from Saby: ' + previous.id);
-        return previous;
-      }
       const price = [leaf.pointCosts[0], leaf.cost, ...leaf.pointCosts].find(value => value > 0);
       const {negativeBalances: oldNegatives, ...item} = previous;
       const negatives = Object.fromEntries(leaf.stock.flatMap((value, i) => value < 0 ? [[i, value]] : []));
@@ -261,7 +268,7 @@ const categories = prev.categories.map(category => ({
 }));
 const total = categories.reduce((sum, cat) => sum + cat.items.reduce((n, group) => n + group.flavors.length, 0), 0);
 log(`Result: ${categories.length} categories; ${total} positions; requests=${api.count()}`);
-return {stores: stores.map(s=>s.name), categories, ...(unreadFolders.length ? {
+return {stores: stores.map(s=>s.name), categories, ...(allowIncompletePreview && unreadFolders.length ? {
   unreadFolders: unreadFolders.map(({hid,name})=>({id:hid,name})),
 } : {})};
 }
