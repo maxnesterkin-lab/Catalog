@@ -255,6 +255,8 @@ const categories = workingCategories.map(category => ({
       return {
         ...item,
         ...(price ? {price, priceStatus:'confirmed'} : {}),
+        storePrices: leaf.pointCosts,
+        catalogPrice: leaf.cost,
         stores: leaf.stock.flatMap((value, i) => value > 0 ? [i] : []),
         stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),
         ...(Object.keys(negatives).length ? {negativeBalances: negatives} : {}),
