@@ -17,9 +17,6 @@ const WAREHOUSES = new Map([
 ]);
 const STORE_ORDER = [...WAREHOUSES.keys()];
 const EXCLUDE_ROOTS = ['вывод из ассортимента'];
-const COLORS = ['#9fd8ff','#ffb36b','#ff8fb1','#b9a5ff','#ffd23f','#8be28b','#7fe3d6','#f2a0ff','#ff7a59','#c9e6ff'];
-const sort = new Intl.Collator('ru');
-const byName = (a,b) => sort.compare(a.name,b.name) || String(a.id ?? a.hid).localeCompare(String(b.id ?? b.hid));
 const normalize = x => String(x ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/^(sv|si)\s+/,'');
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const numeric = v => {
@@ -28,8 +25,6 @@ const numeric = v => {
   return Number.isFinite(number) ? number : null;
 };
 const key = v => {if (v==null || String(v).trim()==='') throw Error('Missing Saby ID'); return String(v);};
-const colorFor = name => {let h=0; for(const c of name) h=(h*31+c.charCodeAt(0))>>>0; return COLORS[h%COLORS.length];};
-function clean(name, folder) {const f=name.trim(); if(f.toLowerCase().startsWith(folder.toLowerCase())) return f.slice(folder.length).replace(/^[\s\-–—:,/]+/,'').trim()||f; return f;}
 function rows(d, field) {
 const v=d?.[field];
 if(Array.isArray(v)) return v;
@@ -95,7 +90,7 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!canRetryFolder(e))th
 }
 throw err;
 }
-async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
+async function fillWarehouseBalances(api, store, missing, storeIndex, log, allowIncompletePreview) {
   async function queryBatch(leaves) {
     const batch = new Map(leaves.map(leaf => [leaf.id, leaf]));
     const params = {
@@ -121,6 +116,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log) {
         await queryBatch(leaves.slice(0, middle));
         await queryBatch(leaves.slice(middle));
       } else {
+        if (!allowIncompletePreview) throw error;
         log(`Warehouse ${store.name}: ${error.message}; ${leaves.length} balances remain unconfirmed`);
       }
       return;
@@ -209,6 +205,9 @@ function gather(n){if(n.leaves.length)leafFolders.push(n);n.children.forEach(gat
 roots.forEach(gather);
 if(!ids.size)throw Error('Empty global catalog');
 log(`Global catalog: ${ids.size} products; ${leafFolders.length} folders; ${stores.length} stores`);
+if (JSON.stringify(prev.stores) !== JSON.stringify(stores.map(s => s.name))) throw Error('Store order changed');
+const publishedIds = new Set(prev.categories.flatMap(c => c.items.flatMap(p => p.flavors.map(f => key(f.id)))));
+leafFolders = leafFolders.map(n => ({...n, leaves:n.leaves.filter(f => publishedIds.has(f.id))})).filter(n => n.leaves.length);
 for (const [si, store] of stores.entries()) {
   const missing = [];
   for (const n of leafFolders) {
@@ -228,43 +227,43 @@ for (const [si, store] of stores.entries()) {
       if (leaf.stock[si] === null) missing.push(leaf);
     }
   }
-  await fillWarehouseBalances(api, store, missing, si, log);
+  await fillWarehouseBalances(api, store, missing, si, log, allowIncompletePreview);
   const unresolved = missing.filter(leaf => leaf.stock[si] === null).length;
-  if (unresolved && !allowIncompletePreview) {
-    throw Error(`Missing balances for ${unresolved} positions in ${store.name}; publication blocked`);
-  }
   const negatives = leafFolders.reduce((count, folder) => count + folder.leaves.filter(leaf => leaf.stock[si] < 0).length, 0);
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
-const categories=[];let total=0;
-for(const root of roots.slice().sort(byName)){
-const items=[];
-function collect(n){
-if(n.leaves.length){
-const leaves=n.leaves.slice().sort(byName);
-const prices=leaves.map(l=>{const preferred=l.pointCosts[0];if(preferred>0)return preferred;if(l.cost>0)return l.cost;const candidates=l.pointCosts.filter(c=>c>0);return candidates.length?Math.min(...candidates):null;});
-if(prices.some(p=>p===null))throw Error('Missing valid prices in '+n.name);
-const flavors = leaves.map(leaf => ({
-  name: clean(leaf.name,n.name),
-  stores: leaf.stock.flatMap((value,index) => value > 0 ? [index] : []),
-  stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),
+const byId = new Map(leafFolders.flatMap(folder => folder.leaves.map(leaf => [leaf.id, leaf])));
+const categories = prev.categories.map(category => ({
+  ...category,
+  items: category.items.map(group => {
+    const flavors = group.flavors.map(previous => {
+      const leaf = byId.get(key(previous.id));
+      if (!leaf) {
+        if (!allowIncompletePreview) throw Error('Published product missing from Saby: ' + previous.id);
+        return previous;
+      }
+      const price = [leaf.pointCosts[0], leaf.cost, ...leaf.pointCosts].find(value => value > 0);
+      const {negativeBalances: oldNegatives, ...item} = previous;
+      const negatives = Object.fromEntries(leaf.stock.flatMap((value, i) => value < 0 ? [[i, value]] : []));
+      return {
+        ...item,
+        ...(price ? {price, priceStatus:'confirmed'} : {}),
+        stores: leaf.stock.flatMap((value, i) => value > 0 ? [i] : []),
+        stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),
+        ...(Object.keys(negatives).length ? {negativeBalances: negatives} : {}),
+      };
+    });
+    const prices = flavors.map(f => f.price).filter(value => value > 0);
+    return {...group, flavors, ...(prices.length ? {
+      price: Math.min(...prices), minKnownPrice: Math.min(...prices), maxKnownPrice: Math.max(...prices),
+    } : {})};
+  }),
 }));
-items.push({name:n.name,meta:'',price:Math.min(...prices),color:colorFor(n.name),flavors});total+=flavors.length;
-}
-n.children.slice().sort(byName).forEach(collect);
-}
-collect(root);if(items.length)categories.push({name:root.name,items});
-}
-const oldCount=prev.categories.reduce((a,c)=>a+c.items.reduce((b,it)=>b+it.flavors.length,0),0);
-if(!unreadFolders.length&&total<oldCount)throw Error(`Catalog shrank from ${oldCount} to ${total}; manual review required`);
-const newCats=new Set(categories.map(c=>normalize(c.name)));
-if(!unreadFolders.length&&prev.categories.some(c=>!EXCLUDE_ROOTS.includes(normalize(c.name))&&!newCats.has(normalize(c.name))))throw Error('Previously published category missing; manual review required');
-log(`Result: ${categories.length} categories; ${total} positions; old positions=${oldCount}; requests=${api.count()}`);
-return {
-  stores:stores.map(s=>s.name),
-  categories,
-  ...(unreadFolders.length ? {unreadFolders:unreadFolders.map(({hid,name})=>({id:hid,name}))} : {}),
-};
+const total = categories.reduce((sum, cat) => sum + cat.items.reduce((n, group) => n + group.flavors.length, 0), 0);
+log(`Result: ${categories.length} categories; ${total} positions; requests=${api.count()}`);
+return {stores: stores.map(s=>s.name), categories, ...(unreadFolders.length ? {
+  unreadFolders: unreadFolders.map(({hid,name})=>({id:hid,name})),
+} : {})};
 }
 async function main(){
 const started=Date.now();const prev=JSON.parse(fs.readFileSync('data.json','utf8'));

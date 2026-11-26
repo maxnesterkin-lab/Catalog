@@ -6,8 +6,7 @@
 <title>SEVERVAPE — каталог</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--tx);font:400 16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
@@ -39,178 +38,361 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 .price{font:800 18px Impact,"Arial Black",sans-serif;margin-top:6px}
 .tag{font:600 11px system-ui,sans-serif;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:8px;vertical-align:middle}
 .av{margin-top:6px;font-size:14px;font-weight:600}
-.av.ok{color:var(--ok)}.av.no{color:var(--no)}
+.av.ok{color:var(--ok)}.av.no{color:var(--no)}.av.unknown{color:var(--warn)}
 .detail{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
 .fl{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:15px}
+.fl .right{text-align:right;flex:0 0 auto;max-width:47%}
+.fl .right .price{font:700 14px system-ui,sans-serif}
 .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:8px}
 .sheet button{flex:1;max-width:220px;background:none;border:0;padding:8px;color:var(--mut);font-size:14px}
 .sheet button.on{color:var(--tx);font-weight:700}
 .err{color:var(--warn)}
 .demo{font-size:12px;color:var(--mut);text-align:center;margin-top:24px}
 .empty{color:var(--mut);text-align:center;padding:40px 0}
+.preview-banner{border:1px solid var(--warn);border-radius:10px;background:#302515;color:#ffcf89;padding:10px 12px;font-size:13px;text-align:center;margin-bottom:12px}
+.store-picker{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);background:var(--card);border-radius:13px;padding:10px 12px;margin:6px 0 18px}.store-picker span{min-width:0}.store-picker b{display:block;font-size:15px}.store-picker small{display:block;font-size:12px;color:var(--mut)}.store-picker button{flex:0 0 auto;border:1px solid var(--ac);border-radius:9px;background:transparent;color:var(--sh);padding:8px 9px;font-size:12px;font-weight:650}.global-store{border-color:var(--ac)}
 </style>
+<style>.av.no::before{content:"● ";color:#e34855}.av.unknown::before{content:"● ";color:#9299a6}</style>
 </head>
 <body>
 <div id="app"></div>
+
 <script>
-// ---------- Telegram Mini App ----------
+// Тестовая версия интерфейса каталога №89. Не публиковать без полной проверки.
 const tg = window.Telegram && window.Telegram.WebApp;
-try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor("#0a0b10"); tg.setBackgroundColor("#0a0b10"); } } catch (e) {}
-
-const LS = {
-  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-};
-const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0b10'); tg.setBackgroundColor('#0a0b10'); } } catch(e) {}
+const LS = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
-
-// ---------- Состояние ----------
-// D — данные из data.json (их обновляет update-script.js из Saby):
-// { updated, stores: ["Баумана", ...], categories: [{ name, items: [{ name, meta, price, color, flavors: [{ name, stores: [индексы магазинов] }] }] }] }
-let D = { stores: [], categories: [], updated: "", addr: {} };
-let S = { step: LS.get("age18") === "1" ? "stores" : "gate", tab: "catalog", store: null, cat: null, q: "", open: null, status: "loading" };
-const BACK = { cats: "stores", list: "cats" };
-
-function normalize(d) {
-  const stores = (d.stores || []).map(s => typeof s === "string" ? { name: s } : { name: s.name, hours: s.hours });
-  const categories = Array.isArray(d.categories) ? d.categories : [];
-  for (const category of categories) {
-    for (const item of category.items) {
-      for (const flavor of item.flavors) {
-        const states = flavor.stockStatus;
-        if (!Array.isArray(states) || states.length !== stores.length ||
-            !Array.isArray(flavor.stores) ||
-            !states.every((state, i) => ["available", "zero", "negative"].includes(state) &&
-              (state === "available") === flavor.stores.includes(i))) {
-          throw new Error("Incomplete stock data");
-        }
-      }
-    }
-  }
-  return {
-    stores,
-    updated: d.updated || "",
-    stockReportDate: d.stockReportDate || "",
-    addr: d.addr || {},
-    categories: categories.map(c => ({
-      name: c.name || "",
-      items: (c.items || []).map(it => ({
-        name: it.name || "", meta: it.meta || "", price: Number(it.price) || 0, color: it.color || "#9fd8ff",
-        flavors: (it.flavors || []).map(f => ({ name: f.name || "", stores: Array.isArray(f.stores) ? f.stores : [], stockStatus: Array.isArray(f.stockStatus) ? f.stockStatus : [] }))
-      }))
+const validStatus = new Set(['available','zero','missing','negative']);
+const validPrice = x => Number.isFinite(Number(x)) && x !== null && String(x).trim()!=='' && Number(x)>0;
+let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
+let S = {step:LS.get('age18')==='1'?'cats':'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
+const BACK={list:'cats'};
+function normalize(d){
+  if(!d || !Array.isArray(d.stores)||!Array.isArray(d.categories)) throw Error('Некорректный каталог');
+  const stores=d.stores.map(s=>typeof s==='string'?{name:s}:{name:String(s.name||''),hours:s.hours});
+  const categories=d.categories.filter(c=>!['Табачные изделия','Системы нагревания табака'].includes(c.name)).map(c=>({name:String(c.name||''),items:(c.items||[]).map(it=>({
+    name:String(it.name||''),meta:it.meta||'',price:validPrice(it.price)?Number(it.price):null,
+    minKnownPrice:validPrice(it.minKnownPrice)?Number(it.minKnownPrice):null,
+    maxKnownPrice:validPrice(it.maxKnownPrice)?Number(it.maxKnownPrice):null,
+    color:it.color||'#9fd8ff',
+    flavors:(it.flavors||[]).map(f=>({
+      id:f.id==null?null:String(f.id),name:String(f.name||''),price:validPrice(f.price)?Number(f.price):null,
+      priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
+      stockStatus:stores.map((_,i)=>{
+        const raw=Array.isArray(f.stockStatus)?f.stockStatus[i]:null;
+        if(validStatus.has(raw))return raw;
+        // В старой схеме отсутствие магазина в stores НЕ доказывает нулевой остаток.
+        return (Array.isArray(f.stores)&&f.stores.includes(i))?'available':'missing';
+      })
     }))
-  };
+  }))}));
+  return {stores,categories,updated:d.updated||'',addr:d.addr||{},stockReportDate:d.stockReportDate || null};
 }
+function load(){
+  S.status='loading';render();
+  const dataPromise=fetch('data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
+  dataPromise.then(data=>{D=normalize(data);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();})
+    .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
+}
+function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
+function pickStore(i){S.store=i;S.tab='catalog';go('cats')}
+function pickCat(i){
+  S.cat=i; S.q=''; S.deviceBrand=null;
+  const devices=D.categories[i].name==='Системы и устройства';
+  BACK.list=devices?'deviceBrands':'cats';
+  go(devices?'deviceBrands':'list');
+}
+BACK.deviceBrands='cats';
+function deviceBrands(){return [...new Set(D.categories[S.cat].items.map(p=>p.name.split(' — ')[0]))]}
+function openDeviceBrand(i){S.deviceBrand=i==null?null:deviceBrands()[i];S.q='';go('list')}
+function toggleItem(i){S.open=S.open===i?null:i;renderList()}
+function adult(){LS.set('age18','1');go('cats')}
+try{if(tg&&tg.BackButton)tg.BackButton.onClick(()=>{if(BACK[S.step])go(BACK[S.step])})}catch(e){}
+function syncBack(){try{if(tg&&tg.BackButton){if(BACK[S.step]&&S.status==='ok')tg.BackButton.show();else tg.BackButton.hide()}}catch(e){}}
+function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">←</button>`:''}<h2>${esc(title)}</h2></div>`}
+function nav(){return `<nav class="sheet"><button class="${S.tab==='catalog'?'on':''}" onclick="go('cats')">Каталог</button><button class="${S.tab==='stores'?'on':''}" onclick="go('stores')">Магазины</button></nav>`}
+function fmtDate(iso){try{return new Date(iso).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' (МСК)'}catch(e){return iso}}
 
-function load() {
-  S.status = "loading"; render();
-  fetch("data.json", { cache: "no-store" })
-    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then(data => {
-      D = normalize(data);
-      const saved = parseInt(LS.get("store"), 10);
-      if (S.store === null && saved >= 0 && saved < D.stores.length) S.store = saved;
-      if (S.step === "stores" && S.store !== null) S.step = "cats";
-      S.status = "ok"; render();
-    })
-    .catch(e => { console.error("Ошибка загрузки данных:", e); S.status = "error"; render(); });
+function stockDetails(f){
+  const elsewhere=D.stores.filter((_,i)=>i!==S.store && getStatus(f,i)==='available');
+  if(elsewhere.length)return 'В наличии: '+elsewhere.map(s=>s.name).join(', ');
+  return S.store===null?'Нет в наличии в сети':'В остальных магазинах нет в наличии';
 }
-
-// ---------- Навигация ----------
-function go(step) {
-  S.step = step; S.open = null;
-  if (step === "cats") S.q = "";
-  render(); window.scrollTo(0, 0);
+function foot(){
+  const date=D.stockReportDate ? 'Остатки на вечер '+D.stockReportDate.split('-').reverse().join('.') : 'Данные на '+fmtDate(D.updated);
+  return D.updated ? '<p class="demo">'+esc(date)+'</p>' : '';
 }
-function pickStore(i) { S.store = i; S.tab = "catalog"; LS.set("store", i); go("cats"); }
-function pickCat(i) { S.cat = i; go("list"); }
-function toggleItem(i) { S.open = S.open === i ? null : i; renderList(); }
-function adult() { LS.set("age18", "1"); go(S.store === null ? "stores" : "cats"); }
-
-try { if (tg && tg.BackButton) tg.BackButton.onClick(() => { if (BACK[S.step]) go(BACK[S.step]); }); } catch (e) {}
-function syncBack() {
-  try { if (tg && tg.BackButton) { if (BACK[S.step] && S.status === "ok") tg.BackButton.show(); else tg.BackButton.hide(); } } catch (e) {}
+function getStatus(f,si){
+  const stocks=f.stockStatus;
+  const available=si==null ? stocks.includes('available') : stocks[si]==='available';
+  return available ? 'available' : 'zero';
 }
-
-// ---------- Отрисовка ----------
-function bar(backStep, title) {
-  return `<div class="top">${backStep ? `<button class="back" aria-label="Назад" onclick="go('${backStep}')">←</button>` : ""}<h2>${esc(title)}</h2></div>`;
+function statusRank(s){return s==='available'?0:s==='zero'?1:2}
+function clearStore(){S.store=null;S.open=null;S.cat=null;S.partsBrand=null;S.partsModel=null;go('cats')}
+function storeContext(){
+  const general=S.store==null;
+  return '<div class="store-picker"><span><b>'+(general?'Все магазины':esc(D.stores[S.store]?.name||'Магазин'))+'</b><small>'+(general?'Общий каталог сети':'Остатки выбранного магазина')+'</small></span><button type="button" onclick="'+(general?'go(\'stores\')':'clearStore()')+'">'+(general?'Выбрать магазин':'Общий каталог')+'</button></div>';
 }
-function nav() {
-  return `<nav class="sheet"><button class="${S.tab === "catalog" ? "on" : ""}" onclick="S.tab='catalog';go(S.store===null?'stores':'cats')">Каталог</button><button class="${S.tab === "stores" ? "on" : ""}" onclick="S.tab='stores';go('stores')">Магазины</button></nav>`;
+function avail(s){return s==='available'?['Есть в наличии','ok']:['Нет в наличии','no']}
+function money(x){return Number(x).toLocaleString('ru-RU')+' ₽'}
+function itemPrice(p){
+  const nums=p.flavors.map(f=>f.price||p.price).filter(validPrice);
+  if(!nums.length)return 'Цена уточняется';
+  const lo=Math.min(...nums),hi=Math.max(...nums);
+  return lo===hi?money(lo):'от '+money(lo)+' до '+money(hi);
 }
-function fmtDate(iso) {
-  try { return new Date(iso).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " (МСК)"; }
-  catch (e) { return iso; }
-}
-function foot() {
-  if (D.stockReportDate) {
-    const date = D.stockReportDate.split("-").reverse().join(".");
-    return `<p class="demo">Остатки на вечер ${esc(date)}</p>`;
+function render(){
+  let h='';
+  if(S.step==='gate'){
+    h=`<div class="gate"><h1>SEVERVAPE</h1><div class="sub">СЕТЬ МАГАЗИНОВ</div><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="adult()">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
+    $('app').innerHTML=h;syncBack();return;
   }
-  return D.updated ? `<p class="demo">Остатки на ${esc(fmtDate(D.updated))}</p>` : "";
+  if(S.status==='loading'){$('app').innerHTML='<div class="empty">Загрузка каталога…</div>';syncBack();return}
+  if(S.status==='error'){$('app').innerHTML='<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>';syncBack();return}
+  if(S.step==='list'&&!D.categories[S.cat])S.step='cats';
+  if(S.step==='stores'){
+    h=bar('cats','Магазины')+'<button class="card store global-store" onclick="clearStore()"><b>Все магазины</b><small>Показать общий каталог сети</small></button>'+(D.stores.length?D.stores.map((s,i)=>{
+      const sub=[s.hours,D.addr[s.name]].filter(Boolean).join(' · ');
+      return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store===i?' <span class="tag">выбран</span>':''}</b>${sub?`<small>${esc(sub)}</small>`:''}</button>`;
+    }).join(''):'<div class="empty">Список магазинов пуст.</div>');
+  }else if(S.step==='cats'){
+    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} групп</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
+  }else if(S.step==='deviceBrands'){
+    h=bar('cats','Системы и устройства')+storeContext()+deviceBrands().map((brand,i)=>
+      '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
+    ).join('')+'<button class="btn ghost" onclick="openDeviceBrand(null)">Все устройства</button>';
+  }else if(S.step==='list'){
+    h=bar(BACK.list,S.deviceBrand||D.categories[S.cat].name)+storeContext()+`<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
+  }
+  $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();syncBack();
 }
-
-function render() {
-  let h = "";
-  if (S.step === "gate") {
-    h = `<div class="gate"><h1>SEVERVAPE</h1><div class="sub">СЕТЬ МАГАЗИНОВ</div><p>Справочник товаров и наличия в магазинах сети. Покупка и доставка через приложение недоступны.</p><button class="btn" onclick="adult()">Мне есть 18 лет</button><button class="btn ghost" onclick="alert('Доступ закрыт')">Мне нет 18 лет</button></div>`;
-    $("app").innerHTML = h; syncBack(); return;
+function renderList(){
+  const cat=D.categories[S.cat],q=S.q.trim().toLowerCase(),out=[];
+  const groups=cat.items.map((p,i)=>({p,i}));
+  if(S.store!==null || cat.name!=='Системы и устройства'){
+    groups.sort((a,b)=>{
+      const rank=p=>{
+        const statuses=p.flavors.map(f=>getStatus(f,S.store));
+        return statuses.includes('available')?0:1;
+      };
+      return rank(a.p)-rank(b.p)||a.p.name.localeCompare(b.p.name,'ru');
+    });
   }
-  if (S.status === "loading") {
-    $("app").innerHTML = `<div class="empty">Загрузка каталога…</div>`; syncBack(); return;
-  }
-  if (S.status === "error") {
-    $("app").innerHTML = `<div class="empty err">Не удалось загрузить данные.</div><button class="btn" onclick="load()">Повторить</button>`; syncBack(); return;
-  }
-  if (S.step !== "stores" && S.store === null) S.step = "stores";
-  if (S.step === "list" && !D.categories[S.cat]) S.step = "cats";
-
-  if (S.step === "stores") {
-    h = bar(null, "Магазины") + (D.stores.length ? D.stores.map((s, i) => {
-      const sub = [s.hours, D.addr[s.name]].filter(Boolean).join(" · ");
-      return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store === i ? ' <span class="tag">выбран</span>' : ""}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
-    }).join("") : `<div class="empty">Список магазинов пуст.</div>`);
-  } else if (S.step === "cats") {
-    h = bar("stores", D.stores[S.store].name) + (D.categories.length
-      ? `<div class="cats">${D.categories.map((c, i) => `<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} поз.</span></button>`).join("")}</div>`
-      : `<div class="empty">Каталог пока пуст.</div>`)
-      + `<button class="btn ghost" onclick="go('stores')">Сменить магазин</button>`;
-  } else if (S.step === "list") {
-    h = bar("cats", D.categories[S.cat].name) + `<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
-  }
-  $("app").innerHTML = h + nav() + foot();
-  if (S.step === "list") renderList();
-  syncBack();
-}
-
-
-function renderList() {
-  const cat = D.categories[S.cat], q = S.q.trim().toLowerCase(), out = [];
-  cat.items.forEach((p, i) => {
-    const all = p.flavors.map((f, fi) => ({ f, fi, here: f.stores.includes(S.store) }));
-    const nameHit = p.name.toLowerCase().includes(q);
-    const fHit = q ? all.filter(x => x.f.name.toLowerCase().includes(q)) : all;
-    if (q && !nameHit && !fHit.length) return;
-    const rows = (q && !nameHit) ? fHit : all;
-    const opened = S.open === i || (q && !nameHit);
-    const available = rows.filter(x => x.here).length;
-    const label = available ? "Есть в наличии" : "Нет в наличии";
-    let body = `<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>`;
-    if (opened) {
-      body = '<div class="detail">' + rows.slice().sort((a, b) => b.here - a.here).map(({ f, here }) => {
-        const others = D.stores.map((s, si) => si).filter(si => si !== S.store && f.stores.includes(si)).map(si => D.stores[si].name);
-        const otherLabel = others.length ? "Есть ещё: " + esc(others.join(", ")) : "В других магазинах нет";
-        const stockLabel = here ? "Есть в наличии" : "Нет в наличии";
-        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${otherLabel}</div></div><span class="av ${here ? "ok" : "no"}" style="margin:0;white-space:nowrap">${stockLabel}</span></div>`;
-      }).join("") + "</div>";
+  groups.forEach(({p,i})=>{
+    if(cat.name==='Системы и устройства' && S.deviceBrand && p.name.split(' — ')[0]!==S.deviceBrand)return;
+    const all=p.flavors.map((f,fi)=>({f,fi,status:getStatus(f,S.store)}));
+    const nameHit=p.name.toLowerCase().includes(q);
+    const filtered=q?all.filter(x=>x.f.name.toLowerCase().includes(q)):all;
+    if(q&&!nameHit&&!filtered.length)return;
+    const rows=q&&!nameHit?filtered:all;
+    const n=all.filter(x=>x.status==='available').length;
+    const opened=S.open===i||(q&&!nameHit);
+    const label=n?'Есть в наличии · '+n+' из '+all.length:'Нет в наличии';
+    const summaryClass=n?'ok':'no';
+    let body='<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>';
+    if(opened){
+      body='<div class="detail">'+rows.slice().sort((a,b)=>statusRank(a.status)-statusRank(b.status)||a.f.name.localeCompare(b.f.name,'ru')).map(({f,status})=>{
+        const [text,cls]=avail(status);
+        const pprice=validPrice(f.price)?money(f.price):(validPrice(p.price)?money(p.price):'Цена уточняется');
+        const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
+        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
+      }).join('')+'</div>';
     }
-    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(" ")[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta ? `<div class="meta">${esc(p.meta)}</div>` : ""}${p.price ? `<div class="price">${p.price} ₽</div>` : ""}<div class="av ${available ? "ok" : "no"}">${label}</div></div></div>${body}</button>`);
+    out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(' ')[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta?`<div class="meta">${esc(p.meta)}</div>`:''}<div class="price">${esc(itemPrice(p))}</div><div class="av ${summaryClass}">${label}</div></div></div>${body}</button>`);
   });
-  $("list").innerHTML = out.length ? out.join("") : `<div class="empty">Ничего не найдено. Измените запрос.</div>`;
+  $('list').innerHTML=out.length?out.join(''):'<div class="empty">Ничего не найдено. Измените запрос.</div>';
 }
+</script>
+<script>
+/* SeverVape v79: navigation by manufacturer -> model -> cartridge/coil.
+   Inventory records, ids, prices and stock statuses are NOT rewritten. */
+(function () {
+'use strict';
+const SOURCE_NAME = 'Комплектующие для систем';
+const PARTS_NAME = 'Картриджи и испарители';
+const EXTRAS_NAME = 'Адаптеры и атомайзеры';
+const BRAND_ORDER = ['VAPORESSO','PLONQ','GEEKVAPE','VOOPOO','SMOANT','SMOK','ASPIRE / BRUSKO','OXVA','LOST VAPE','RINCOE','FOOSE','NEVOKS','JUSTFOG','VANZA','SUORIN','UWELL','WISMEC','VIVA LA CLOUD','HOTCIG','GEN AIR'];
+const BRANDS = [
+ ['VAPORESSO',/\bVAPORESSO\b/],['PLONQ',/\bPLONQ\b/],['GEEKVAPE',/\bGEEKVAPE\b/],
+ ['VOOPOO',/\bVOOPOO\b/],['SMOANT',/\bSMOANT\b/],['SMOK',/\bSMOK\b/],
+ ['ASPIRE / BRUSKO',/\bASPIRE\b|\bBRUSKO\b/],['OXVA',/\bOXVA\b/],
+ ['LOST VAPE',/\bLOST\s+VAPE\b/],['RINCOE',/\bRINCOE\b/],['FOOSE',/\bFOOSE\b/],
+ ['NEVOKS',/\bNEVOKS\b/],['JUSTFOG',/\bJUSTFOG\b/],['VANZA',/\bVANZA\b/],
+ ['SUORIN',/\bSUORIN\b/],['UWELL',/\bUWELL\b/],['WISMEC',/\bWISMEC\b/],
+ ['VIVA LA CLOUD',/VIVA\s+LA\s+CLOUD/],['HOTCIG',/\bHOTCIG\b/],['GEN AIR',/\bGEN\s+AIR\b/]
+];
+const SERIES = {
+ 'VAPORESSO':[
+ ['XROS',/\bXROS\b/],['LUXE X / XR',/\bLUXE\s+X(R)?\b/],['LUXE Q',/\bLUXE\s+Q\b/],
+ ['LUXE PM40',/\bLUXE\s+PM40\b/],['ECO NANO',/\bECO\s+NANO\b/],['VIBE',/\bVIBE\b/],
+ ['APEX',/\bAPEX\b/],['ARMOUR',/\bARMOUR\b/],['GTX',/\bGTX\b/],
+ ['GT',/\bGT\b|\bGT2\b|\bGT4\b/],['XTRA',/\bXTRA\b/],['ZERO',/\bZERO\b/],
+ ['OSMALL',/\bOSMALL\b/],['SWAG',/\bSWAG\b/],['TARGET',/\bTARGET\b/],
+ ['BARR',/\bBARR\b/],['XTANK',/\bXTANK\b/]
+ ],
+ 'PLONQ':[['META',/\bMETA\b/]],
+ 'GEEKVAPE':[
+ ['AEGIS BOOST',/\bAEGIS\s+BOOST\b/],['AEGIS HERO',/\bHERO\b/],
+ ['H45',/\bH45\b/],['AP2',/\bAP2\b/],['WENAX',/\bWENAX\b/],
+ ['Q',/\bQ\b/],['B',/\bB\b/],['G',/\bG\b/],['P',/\bP\b/],
+ ['N',/\bN\b/],['ONE',/\bONE\b/],['U',/\bU\b/]
+ ],
+ 'VOOPOO':[
+ ['ARGUS',/\bARGUS\b/],['VMATE',/\bVMATE\b/],['PNP X',/\bPNP\s+X\b/],
+ ['PNP',/\bPNP\b/],['ITO',/\bITO\b/],['VINCI',/\bVINCI\b/],
+ ['DRAG NANO',/\bDRAG\s+NANO\b/],['TPP',/\bTPP\b/],['POD-S1',/\bPOD-S1\b/]
+ ],
+ 'SMOANT':[
+ ['PASITO',/\bPASITO\b/],['KNIGHT',/\bKNIGHT\b/],['LEVIN',/\bLEVIN\b/],
+ ['BATTLESTAR / CHARON BABY',/\bBATTLESTAR\b|\bCHARON\s+BABY\b/],
+ ['SANTI / S-COIL',/\bSANTI\b|\bS-COIL\b/],['K SERIES',/\bK-[1-4]\b|\bSMOANT\s+K\b/],
+ ['VEER',/\bVEER\b/],['VIKII',/\bVIKII\b/],['BABY LF',/\bBABY\s+LF\b/]
+ ],
+ 'SMOK':[['NOVO',/\bNOVO\b/],['NORD',/\bNORD\b/],['RPM',/\bRPM\b/],
+         ['LP1',/\bLP1\b/],['SOLUS',/\bSOLUS\b/]],
+ 'ASPIRE / BRUSKO':[
+ ['MINICAN',/\bMINICAN\b/],['FLEXUS',/\bFLEXUS\b/],['FAVOSTIX',/\bFAVOSTIX\b/],
+ ['VILTER',/\bVILTER\b/],['DABBLER',/\bDABBLER\b/],['FURY',/\bFURY\b/]
+ ],
+ 'OXVA':[['XLIM',/\bXLIM\b/],['ORIGIN X',/\bORIGIN\s+X\b/]],
+ 'LOST VAPE':[['UB',/\bUB\b|ULTRA\s+BOOST/]],
+ 'RINCOE':[['JELLYBOX',/\bJELLYBOX\b/],['MANTO AIO',/\bMANTO\s+AIO\b/]],
+ 'FOOSE':[['RIZZ',/\bRIZZ\b/]],
+ 'NEVOKS':[['FEELIN MINI',/\bFEELIN\b/],['SPL 10',/\bSPL\s+10\b/]],
+ 'JUSTFOG':[['MINIFIT',/\bMINIFIT\b/],['C601',/\bC601\b/]],
+ 'VANZA':[['NANO BUN',/\bNANO\s+BUN\b/]],
+ 'SUORIN':[['EDGE',/\bEDGE\b/]],
+ 'WISMEC':[['R40 / R80',/\bR40\b|\bR80\b/]],
+ 'VIVA LA CLOUD':[['V-CAPS',/\bV-CAPS\b/]],
+ 'HOTCIG':[['KUBI PLUS',/\bKUBI\s+PLUS\b/]],
+ 'GEN AIR':[['GEN AIR',/\bGEN\s+AIR\b/]]
+};
+const priority = b => { const i=BRAND_ORDER.indexOf(b); return i===-1?1000:i; };
+const modelSort = brand => (a,b) => {
+ const ranking=SERIES[brand]||[];
+ const index=m=>m==='Другие модели'?1000:ranking.findIndex(x=>x[0]===m);
+ const ra=index(a),rb=index(b);
+ return (ra<0?999:ra)-(rb<0?999:rb)||a.localeCompare(b,'ru');
+};
+const oldNormalize=normalize;
+normalize=function(input){
+ const d=oldNormalize(input);
+ const idx=d.categories.findIndex(c=>c.name===SOURCE_NAME);
+ if(idx>=0){
+  const cat=d.categories[idx];
+  const extras=cat.items.filter(p=>/^(Адаптеры и аккумуляторы|Атомайзеры)$/i.test(p.name));
+  cat.items=cat.items.filter(p=>!extras.includes(p));
+  cat.name=PARTS_NAME;
+  if(extras.length)d.categories.splice(idx+1,0,{name:EXTRAS_NAME,items:extras});
+ }
+ // In the devices section, keep original AEGIS grouping; preserve brand priority in general mode.
+ const devices=d.categories.find(c=>c.name==='Системы и устройства');
+ if(devices)devices.items.sort((a,b)=>{
+   const A=(a.name.split('—')[0]||'').trim(),B=(b.name.split('—')[0]||'').trim();
+   const pa=priority(A==='ASPIRE / BRUSKO'?'ASPIRE / BRUSKO':A),pb=priority(B==='ASPIRE / BRUSKO'?'ASPIRE / BRUSKO':B);
+   return pa-pb || a.name.localeCompare(b.name,'ru');
+ });
+ return d;
+};
+const oldPickCat=pickCat;
+pickCat=function(i){
+ if(D.categories[i]?.name===PARTS_NAME){S.cat=i; S.partsBrand=null;S.partsModel=null;go('partsBrands');}
+ else oldPickCat(i);
+};
+BACK.partsBrands='cats';BACK.partsModels='partsBrands';BACK.partsItems='partsModels';
+function partRows(){
+ const cat=D.categories.find(c=>c.name===PARTS_NAME);
+ if(!cat)return [];
+ const records=[];
+ cat.items.forEach(group=>group.flavors.forEach(f=>{
+  const t=(f.name+' '+group.name).toUpperCase();
+  const b=BRANDS.find(([_,pat])=>pat.test(t));
+  const brand=b?b[0]:'ДРУГИЕ ПРОИЗВОДИТЕЛИ';
+  const match=(SERIES[brand]||[]).find(([_,pat])=>pat.test(t));
+  const model=match?match[0]:'Другие модели';
+  records.push({group,f,brand,model});
+ }));
+ return records;
+}
+const oldRender=render;
+render=function(){
+ if(!['partsBrands','partsModels','partsItems'].includes(S.step)){oldRender();return;}
+ if(S.status!=='ok'){oldRender();return;}
+ const all=partRows(),countHere=rows=>rows.filter(x=>getStatus(x.f,S.store)==='available').length;
+ const element=(txt,meta,click)=>`<button class="card parts-folder" onclick="${click}"><b>${esc(txt)}</b><span class="meta">${esc(meta)}</span><span aria-hidden="true" class="parts-chevron">›</span></button>`;
+ let html='';
+ if(S.step==='partsBrands'){
+   html=bar('cats',PARTS_NAME)+storeContext()+'<p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>';
+   const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>S.store===null?priority(a)-priority(b)||a.localeCompare(b,'ru'):(Number(countHere(all.filter(x=>x.brand===b))>0)-Number(countHere(all.filter(x=>x.brand===a))>0))||a.localeCompare(b,'ru'));
+   html+=brands.map((b,i)=>{
+    const rows=all.filter(x=>x.brand===b),models=new Set(rows.map(x=>x.model)).size;
+    return element(b,`${models} серий · ${countHere(rows)} позиций в наличии ${S.store===null?'в сети':'здесь'}`,`openPartsBrand(${i})`);
+   }).join('');
+ }else if(S.step==='partsModels'){
+   html=bar('partsBrands',S.partsBrand)+storeContext()+'<p class="meta parts-intro">Выберите серию. Совместимость с конкретной версией устройства уточняйте у консультанта.</p>';
+   const rows=all.filter(x=>x.brand===S.partsBrand);
+   const models=[...new Set(rows.map(x=>x.model))].sort(S.store===null?modelSort(S.partsBrand):(a,b)=>(Number(countHere(rows.filter(x=>x.model===b))>0)-Number(countHere(rows.filter(x=>x.model===a))>0))||a.localeCompare(b,'ru'));
+   html+=models.map((m,i)=>{
+    const group=rows.filter(x=>x.model===m);
+    return element(m,`${group.length} позиций · ${countHere(group)} в наличии ${S.store===null?'в сети':'здесь'}`,`openPartsModel(${i})`);
+   }).join('');
+ }else{
+   const rows=all.filter(x=>x.brand===S.partsBrand&&x.model===S.partsModel);
+   html=bar('partsModels',S.partsModel)+storeContext()+`<p class="meta parts-intro">${esc(S.partsBrand)} · ${rows.length} позиций. Количество означает разновидности, не штуки на складе.</p>`;
+   html+=rows.sort((a,b)=>{
+    const ca=statusRank(getStatus(a.f,S.store)),cb=statusRank(getStatus(b.f,S.store));
+    return ca-cb||a.f.name.localeCompare(b.f.name,'ru');
+   }).map(({f,group})=>{
+     const status=getStatus(f,S.store),[label,cls]=avail(status);
+     const price=validPrice(f.price)?money(f.price):(validPrice(group.price)?money(group.price):'Цена уточняется');
+     const stockText=stockDetails(f);
+     return `<div class="card"><div class="parts-product"><div><b>${esc(f.name)}</b><div class="meta">${esc(group.name)}</div><div class="av ${cls}">${esc(label)}</div><div class="meta">${esc(stockText)}</div></div><div class="price">${esc(price)}</div></div></div>`;
+   }).join('')||'<div class="empty">В этой серии пока нет позиций.</div>';
+ }
+ $('app').innerHTML=html+nav()+foot();syncBack();
+};
+window.openPartsBrand=function(i){
+ const all=partRows(); const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>S.store===null?priority(a)-priority(b)||a.localeCompare(b,'ru'):(Number(all.some(x=>x.brand===b&&getStatus(x.f,S.store)==='available'))-Number(all.some(x=>x.brand===a&&getStatus(x.f,S.store)==='available')))||a.localeCompare(b,'ru'));
+ S.partsBrand=brands[i];S.partsModel=null;go('partsModels');
+};
+window.openPartsModel=function(i){
+ const rows=partRows().filter(x=>x.brand===S.partsBrand);
+ const models=[...new Set(rows.map(x=>x.model))].sort(S.store===null?modelSort(S.partsBrand):(a,b)=>(Number(rows.some(x=>x.model===b&&getStatus(x.f,S.store)==='available'))-Number(rows.some(x=>x.model===a&&getStatus(x.f,S.store)==='available')))||a.localeCompare(b,'ru'));
+ S.partsModel=models[i];go('partsItems');
+};
+window.openPartsForDevice=function(brand){
+ const row=partRows().find(x=>x.brand===brand);if(!row)return;
+ S.cat=D.categories.findIndex(c=>c.name===PARTS_NAME);
+ S.partsBrand=brand;S.partsModel=null;go('partsModels');
+};
+const oldRenderList=renderList;
+renderList=function(){
+ oldRenderList();
+ if(S.step!=='list'||D.categories[S.cat]?.name!=='Системы и устройства')return;
+ const cards=Array.from($('list').querySelectorAll('.card'));
+ const products=D.categories[S.cat].items;
+ // The base list skips products during text search, so identify cards by rendered product name.
+ for(const card of cards){
+   const h=card.querySelector('h3'); if(!h)continue;
+   const p=products.find(x=>x.name===h.textContent);if(!p)continue;
+   const pi=products.indexOf(p);
+   if(S.open!==pi && !(S.q && !p.name.toLowerCase().includes(S.q.toLowerCase())))continue;
+   const brand=p.name.split('—')[0].trim();
+   if(!partRows().some(x=>x.brand===brand))continue;
+   const btn=document.createElement('button');btn.className='parts-go';btn.type='button';
+   btn.textContent='Картриджи и испарители '+brand+' →';
+   btn.onclick=()=>openPartsForDevice(brand);
+   card.insertAdjacentElement('afterend',btn);
+ }
+};
+const css=document.createElement('style');
+css.textContent=`.parts-folder{position:relative;padding-right:34px}.parts-folder b{display:block;font-size:17px;margin-bottom:4px}.parts-folder .meta{display:block;font-size:13px}.parts-chevron{position:absolute;right:14px;top:15px;font-size:23px;color:var(--sh)}.parts-intro{margin:0 0 17px}.parts-product{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.parts-product>div:first-child{min-width:0;flex:1}.parts-product>.price{flex:0 0 auto;font-size:16px;white-space:nowrap}.parts-go{width:100%;margin:-6px 0 18px;padding:9px 12px;background:transparent;border:1px solid var(--ac);border-radius:10px;color:var(--sh);font-size:13px;text-align:center}`;
+document.head.appendChild(css);
+})();
 
-render();
-load();
-</script></body>
+render();load();
+</script>
+</body>
 </html>
