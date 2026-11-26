@@ -149,7 +149,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
 
 async function sync(api,prev,log=console.log,{allowIncompletePreview=false}={}){
 await api.login();
-const points=rows(await api.get('point/list',{product:'retail',pageSize:100}),'salesPoints');
+const points=rows(await api.get('point/list',{product:'retail',page:0,pageSize:100}),'salesPoints');
 const stores=STORE_ORDER.map(name=>{
 const target=normalize(name);const matches=points.filter(p=>normalize(p.name)===target||(target==='гаджиева'&&normalize(p.name)==='гаджиево'));
 if(matches.length!==1) throw Error('Sales point not unique: '+name);
@@ -244,16 +244,22 @@ for (const [si, store] of stores.entries()) {
   log(`Stock ${store.name}: warehouse resolved=${missing.length-unresolved}; unknown=${unresolved}; negative=${negatives}; requests=${api.count()}`);
 }
 appendNewVariants(additions, log);
+const priceDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow'}).format(new Date());
 const categories = workingCategories.map(category => ({
   ...category,
   items: category.items.map(group => {
     const flavors = group.flavors.map(previous => {
       const leaf = byId.get(key(previous.id));
-      const price = [leaf.pointCosts[0], leaf.cost, ...leaf.pointCosts].find(value => value > 0);
+      const price = leaf.cost;
+      const storePrices = {...previous.storePrices};
+      leaf.pointCosts.forEach((value, index) => {
+        if (value > 0) storePrices[index] = {price:value, date:priceDate};
+      });
       const {negativeBalances: oldNegatives, ...item} = previous;
       const negatives = Object.fromEntries(leaf.stock.flatMap((value, i) => value < 0 ? [[i, value]] : []));
       return {
         ...item,
+        storePrices,
         ...(price ? {price, priceStatus:'confirmed'} : {}),
         stores: leaf.stock.flatMap((value, i) => value > 0 ? [i] : []),
         stockStatus: leaf.stock.map(value => value === null ? 'missing' : value < 0 ? 'negative' : value === 0 ? 'zero' : 'available'),

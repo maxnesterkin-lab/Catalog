@@ -79,7 +79,7 @@ function normalize(d){
     color:it.color||'#9fd8ff',
     flavors:(it.flavors||[]).map(f=>({
       id:f.id==null?null:String(f.id),name:String(f.name||''),price:validPrice(f.price)?Number(f.price):null,
-      priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
+      storePrices:f.storePrices||{},priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
       stockStatus:stores.map((_,i)=>{
         const raw=Array.isArray(f.stockStatus)?f.stockStatus[i]:null;
         if(validStatus.has(raw))return raw;
@@ -118,6 +118,7 @@ function fmtDate(iso){try{return new Date(iso).toLocaleString('ru-RU',{timeZone:
 function stockDetails(f){
   const elsewhere=D.stores.filter((_,i)=>i!==S.store && getStatus(f,i)==='available');
   if(elsewhere.length)return 'В наличии: '+elsewhere.map(s=>s.name).join(', ');
+  if(f.stockStatus.some((s,i)=>i!==S.store && (s==='missing'||s==='negative')))return 'По части магазинов остаток не подтверждён';
   return S.store===null?'Нет в наличии в сети':'В остальных магазинах нет в наличии';
 }
 function foot(){
@@ -127,7 +128,9 @@ function foot(){
 function getStatus(f,si){
   const stocks=f.stockStatus;
   const available=si==null ? stocks.includes('available') : stocks[si]==='available';
-  return available ? 'available' : 'zero';
+  if(available)return 'available';
+  const scope=si==null?stocks:[stocks[si]];
+  return scope.every(s=>s==='zero')?'zero':'missing';
 }
 function statusRank(s){return s==='available'?0:s==='zero'?1:2}
 function clearStore(){S.store=null;S.open=null;S.cat=null;S.partsBrand=null;S.partsModel=null;go('cats')}
@@ -135,14 +138,20 @@ function storeContext(){
   const general=S.store==null;
   return '<div class="store-picker"><span><b>'+(general?'Все магазины':esc(D.stores[S.store]?.name||'Магазин'))+'</b><small>'+(general?'Общий каталог сети':'Остатки выбранного магазина')+'</small></span><button type="button" onclick="'+(general?'go(\'stores\')':'clearStore()')+'">'+(general?'Выбрать магазин':'Общий каталог')+'</button></div>';
 }
-function avail(s){return s==='available'?['Есть в наличии','ok']:['Нет в наличии','no']}
+function avail(s){return s==='available'?['Есть в наличии','ok']:s==='zero'?['Нет в наличии','no']:['Остаток не подтверждён','meta']}
 function money(x){return Number(x).toLocaleString('ru-RU')+' ₽'}
-function itemPrice(p){
-  const nums=p.flavors.map(f=>f.price||p.price).filter(validPrice);
-  if(!nums.length)return 'Цена уточняется';
-  const lo=Math.min(...nums),hi=Math.max(...nums);
+function pricesFor(f){
+  const local=f.storePrices[S.store];
+  if(S.store!==null && validPrice(local?.price))return [Number(local.price)];
+  const values=S.store===null?Object.values(f.storePrices).map(x=>x.price):[];
+  return [...values,f.price].filter(validPrice).map(Number);
+}
+function priceRange(values){
+  if(!values.length)return 'Цена уточняется';
+  const lo=Math.min(...values),hi=Math.max(...values);
   return lo===hi?money(lo):'от '+money(lo)+' до '+money(hi);
 }
+function itemPrice(p){return priceRange(p.flavors.flatMap(pricesFor))}
 function render(){
   let h='';
   if(S.step==='gate'){
@@ -189,13 +198,13 @@ function renderList(){
     const rows=q&&!nameHit?filtered:all;
     const n=all.filter(x=>x.status==='available').length;
     const opened=S.open===i||(q&&!nameHit);
-    const label=n?'Есть в наличии · '+n+' из '+all.length:'Нет в наличии';
+    const label=n?'Есть в наличии · '+n+' из '+all.length:avail(all.some(x=>x.status==='missing')?'missing':'zero')[0];
     const summaryClass=n?'ok':'no';
     let body='<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>';
     if(opened){
       body='<div class="detail">'+rows.slice().sort((a,b)=>statusRank(a.status)-statusRank(b.status)||a.f.name.localeCompare(b.f.name,'ru')).map(({f,status})=>{
         const [text,cls]=avail(status);
-        const pprice=validPrice(f.price)?money(f.price):(validPrice(p.price)?money(p.price):'Цена уточняется');
+        const pprice=priceRange(pricesFor(f));
         const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
         return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
       }).join('')+'</div>';
@@ -346,7 +355,7 @@ render=function(){
     return ca-cb||a.f.name.localeCompare(b.f.name,'ru');
    }).map(({f,group})=>{
      const status=getStatus(f,S.store),[label,cls]=avail(status);
-     const price=validPrice(f.price)?money(f.price):(validPrice(group.price)?money(group.price):'Цена уточняется');
+     const price=priceRange(pricesFor(f));
      const stockText=stockDetails(f);
      return `<div class="card"><div class="parts-product"><div><b>${esc(f.name)}</b><div class="meta">${esc(group.name)}</div><div class="av ${cls}">${esc(label)}</div><div class="meta">${esc(stockText)}</div></div><div class="price">${esc(price)}</div></div></div>`;
    }).join('')||'<div class="empty">В этой серии пока нет позиций.</div>';
