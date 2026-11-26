@@ -1,0 +1,40 @@
+name: Apply confirmed Saby review
+on:
+  workflow_run:
+    workflows: [Recheck Saby prices and balances]
+    types: [completed]
+    branches: [recheck-saby-catalog-20261126]
+permissions:
+  actions: read
+  contents: write
+  pages: write
+concurrency:
+  group: saby-catalog-update-main
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.id == 45868228266
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: saby-price-stock-review
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/saby-review
+      - name: Apply confirmed observations and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:data.json)" = "b506a705450c0800252cc803b968d7d3d59d22e6"
+          node apply-saby-review.js "$RUNNER_TEMP/saby-review/saby-preview.json"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data.json
+          git commit -m 'Apply verified Saby prices and warehouse balances'
+          git push origin HEAD:main
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent

@@ -88,7 +88,7 @@ function normalize(d){
       })
     }))
   }))}));
-  return {stores,categories,updated:d.updated||'',addr:d.addr||{},stockReportDate:d.stockReportDate || null};
+  return {stores,categories,updated:d.updated||'',addr:d.addr||{},lastPartialReview:d.lastPartialReview,stockReportDate:d.stockReportDate || null};
 }
 function load(){
   S.status='loading';render();
@@ -123,7 +123,7 @@ function stockDetails(f){
 }
 function foot(){
   const date=D.stockReportDate ? 'Остатки на вечер '+D.stockReportDate.split('-').reverse().join('.') : 'Данные на '+fmtDate(D.updated);
-  return D.updated ? '<p class="demo">'+esc(date)+'</p>' : '';
+  return D.updated ? '<p class="demo">'+esc(date)+(D.lastPartialReview?' · Частичная сверка '+esc(fmtDate(D.lastPartialReview)):'')+'</p>' : '';
 }
 function getStatus(f,si){
   const stocks=f.stockStatus;
