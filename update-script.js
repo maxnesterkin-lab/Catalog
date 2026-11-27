@@ -122,7 +122,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
       return;
     }
 
-    if (response?.outcome?.hasMore === true) {
+    if (response?.outcome?.hasMore !== undefined && response.outcome.hasMore !== false) {
       throw Error('Incomplete warehouse balance response for '+store.name);
     }
     const fields = ['balances', 'nomenclatures', 'items', 'data', 'result'];
@@ -138,8 +138,10 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
       seen.add(id);
       batch.get(id).stock[storeIndex] = numeric(record.balance);
     }
-    // Saby may omit products without a balance record. Do not fan out into
-    // thousands of individual requests or treat an omitted row as confirmed zero.
+    // Only infer zero for requested IDs omitted from a successfully validated warehouse response.
+    for (const [id, leaf] of batch) {
+      if (!seen.has(id) && leaf.stock[storeIndex] === null) leaf.stock[storeIndex] = 0;
+    }
   }
 
   for (let start = 0; start < missing.length; start += 50) {
