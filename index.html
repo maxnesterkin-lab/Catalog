@@ -61,13 +61,12 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 // Тестовая версия интерфейса каталога №89. Не публиковать без полной проверки.
 const tg = window.Telegram && window.Telegram.WebApp;
 try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0b10'); tg.setBackgroundColor('#0a0b10'); } } catch(e) {}
-const LS = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
 const validStatus = new Set(['available','zero','missing','negative']);
 const validPrice = x => Number.isFinite(Number(x)) && x !== null && String(x).trim()!=='' && Number(x)>0;
 let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
-let S = {step:LS.get('age18')==='1'?'cats':'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
+let S = {step:'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
 const BACK={list:'cats'};
 function normalize(d){
   if(!d || !Array.isArray(d.stores)||!Array.isArray(d.categories)) throw Error('Некорректный каталог');
@@ -108,7 +107,13 @@ BACK.deviceBrands='cats';
 function deviceBrands(){return [...new Set(D.categories[S.cat].items.map(p=>p.name.split(' — ')[0]))]}
 function openDeviceBrand(i){S.deviceBrand=i==null?null:deviceBrands()[i];S.q='';go('list')}
 function toggleItem(i){S.open=S.open===i?null:i;renderList()}
-function adult(){LS.set('age18','1');go('cats')}
+function adult(){go('cats')}
+function requireAgeConfirmation(){
+  if(S.step!=='gate')go('gate');
+}
+window.addEventListener('pagehide',requireAgeConfirmation);
+window.addEventListener('pageshow',event=>{if(event.persisted)requireAgeConfirmation()});
+if(tg && tg.onEvent)tg.onEvent('deactivated',requireAgeConfirmation);
 try{if(tg&&tg.BackButton)tg.BackButton.onClick(()=>{if(BACK[S.step])go(BACK[S.step])})}catch(e){}
 function syncBack(){try{if(tg&&tg.BackButton){if(BACK[S.step]&&S.status==='ok')tg.BackButton.show();else tg.BackButton.hide()}}catch(e){}}
 function bar(back,title){return `<div class="top">${back?`<button class="back" aria-label="Назад" onclick="go('${back}')">←</button>`:''}<h2>${esc(title)}</h2></div>`}
