@@ -25,7 +25,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sh);outline-off
 .gate p{color:var(--mut);margin:0 0 26px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;width:100%;text-align:left;display:block}
 .store b{display:block;font-size:17px}
-.store small{color:var(--mut)}
+.store small{display:block;margin-top:4px;font-size:14px;line-height:1.4;color:#bec8d8;white-space:normal}
 .cats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .cat{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:16px 14px;font:700 15px/1.2 system-ui,sans-serif;text-align:left;min-height:96px;display:flex;flex-direction:column;justify-content:space-between}
 .cat span{font:400 13px system-ui,sans-serif;color:var(--mut)}
@@ -64,6 +64,19 @@ try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0b10'); tg.setBac
 const LS = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
+const storeAddresses = {
+  "Баумана": "Мурманск, ул. Баумана, д. 3",
+  "ГУМ": "Мурманск, пр-кт Героев-североморцев, д. 77",
+  "Гаджиева": "Мурманск, ул. Магомета Гаджиева, д. 2/47",
+  "КТМ": "Мурманск, ул. Карла Маркса, д. 29",
+  "Крупской": "Мурманск, ул. Крупской, д. 38",
+  "Книповича": "Мурманск, ул. Академика Книповича, д. 37",
+  "Кольский": "Мурманск, Кольский пр-кт, д. 51, к. 8",
+  "Ленина": "Мурманск, пр-кт Ленина, д. 19А",
+  "Мир": "Мурманск, пр-кт Героев-североморцев, д. 33А",
+  "ПЗ": "Мурманск, ул. Полярные Зори, д. 42",
+  "Североморск": "Североморск, ул. Вице-адмирала Падорина, д. 21"
+};
 const validStatus = new Set(['available','zero','missing','negative']);
 const validPrice = x => Number.isFinite(Number(x)) && x !== null && String(x).trim()!=='' && Number(x)>0;
 let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
@@ -88,7 +101,7 @@ function normalize(d){
       })
     }))
   }))}));
-  return {stores,categories,updated:d.updated||'',addr:d.addr||{},lastPartialReview:d.lastPartialReview,stockReportDate:d.stockReportDate || null};
+  return {stores,categories,updated:d.updated||'',addr:{...storeAddresses,...d.addr},lastPartialReview:d.lastPartialReview,stockReportDate:d.stockReportDate || null};
 }
 function load(){
   S.status='loading';render();
