@@ -6,7 +6,7 @@
 <title>SEVERVAPE — каталог</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#0a0b10;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root{--bg:#010101;--card:#141414;--line:#2a2a2a;--tx:#f4f4f4;--mut:#9a9a9a;--ac:#8a5cf5;--ac-tx:#000;--sh:#00f0ff;--ok:#4cc26a;--warn:#e8a23a;--no:#777;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--tx);font:400 16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
@@ -20,7 +20,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--sh);outline-off
 .btn{display:block;width:100%;background:var(--ac);color:var(--ac-tx);border:2px solid var(--ac);border-radius:14px;padding:14px;font-weight:700;box-shadow:5px 5px 0 var(--sh)}
 .btn.ghost{background:transparent;color:var(--tx);box-shadow:none;border-color:var(--line);margin-top:14px}
 .gate{padding-top:6vh;text-align:center}
-html:has(.gate){--bg:#010101;background:var(--bg)}
+html{background:var(--bg)}
 .gate h1{margin:0 0 18px}
 .gate-logo{display:block;width:100%;height:auto}
 .gate p{color:var(--mut);margin:0 0 26px}
@@ -61,7 +61,7 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 <script>
 // Тестовая версия интерфейса каталога №89. Не публиковать без полной проверки.
 const tg = window.Telegram && window.Telegram.WebApp;
-try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0a0b10'); tg.setBackgroundColor('#0a0b10'); } } catch(e) {}
+try { if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#010101'); tg.setBackgroundColor('#010101'); } } catch(e) {}
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
 const storeAddresses = {
