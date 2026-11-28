@@ -93,6 +93,8 @@ let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
 let S = {step:'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
 const BACK={list:'cats'};
 const hiddenBoosterIds = new Set(['6220','6217']);
+// Confirmed combined old-batch SKU; hide from the public preview, not from Saby.
+const hiddenCombinedIds = new Set(['14120']);
 function isBooster(name){
   return /^\s*(?:бустер(?:ы)?|boosters?)(?:$|[^а-яёa-z])/i.test(name || '');
 }
@@ -104,7 +106,7 @@ function normalize(d){
     minKnownPrice:validPrice(it.minKnownPrice)?Number(it.minKnownPrice):null,
     maxKnownPrice:validPrice(it.maxKnownPrice)?Number(it.maxKnownPrice):null,
     color:it.color||'#9fd8ff',
-    flavors:(it.flavors||[]).filter(f=>!hiddenBoosterIds.has(String(f.id)) && !isBooster(f.name)).map(f=>({
+    flavors:(it.flavors||[]).filter(f=>!hiddenBoosterIds.has(String(f.id)) && !hiddenCombinedIds.has(String(f.id)) && !isBooster(f.name)).map(f=>({
       id:f.id==null?null:String(f.id),name:String(f.name||''),price:validPrice(f.price)?Number(f.price):null,
       storePrices:f.storePrices||{},priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
       stockStatus:stores.map((_,i)=>{
