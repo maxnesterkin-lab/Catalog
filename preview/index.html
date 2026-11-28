@@ -288,10 +288,10 @@ function deviceSearchTokens(value){
   return String(value || '').toLocaleLowerCase('ru').replace(/ё/g,'е')
     .replace(/(\d),(\d)/g,'$1.$2').match(/\d+(?:\.\d+)?|[\p{L}]+/gu)||[];
 }
-function deviceSearchRows(categories,query){
+function deviceSearchRows(categories,query,partsOnly=false){
   const wanted=deviceSearchTokens(query);
   if(!wanted.length)return [];
-  const allowed=new Set(['Системы и устройства','Картриджи и испарители','Адаптеры и атомайзеры','Комплектующие для систем']);
+  const allowed=new Set(partsOnly?['Картриджи и испарители']:['Системы и устройства','Картриджи и испарители','Адаптеры и атомайзеры','Комплектующие для систем']);
   const rows=[];
   for(const category of categories){
     if(!allowed.has(category.name))continue;
@@ -316,7 +316,7 @@ function renderDeviceSearch(){
     ).join('')+'<button class="btn ghost" onclick="openDeviceBrand(null)">Все устройства</button>';
     return;
   }
-  const matches=deviceSearchRows(D.categories,S.q);
+  const matches=deviceSearchRows(D.categories,S.q,S.step==='partsBrands');
   if(!matches.length){target.innerHTML='<div class="empty">Ничего не найдено. Измените запрос.</div>';return;}
   matches.sort((a,b)=>statusRank(getStatus(a.f,S.store))-statusRank(getStatus(b.f,S.store))||a.f.name.localeCompare(b.f.name,'ru'));
   const sections=[['Системы и устройства'],['Картриджи и испарители','Комплектующие для систем'],['Адаптеры и атомайзеры']];
@@ -525,7 +525,7 @@ render=function(){
  const element=(txt,meta,click)=>`<button class="card parts-folder" onclick="${click}"><b>${esc(txt)}</b><span class="meta">${esc(meta)}</span><span aria-hidden="true" class="parts-chevron">›</span></button>`;
  let html='';
  if(S.step==='partsBrands'){
-   html=bar('cats',PARTS_NAME)+storeContext()+`<input type="search" id="device-search" aria-label="Поиск устройств и комплектующих" placeholder="Поиск устройств и комплектующих" value="${esc(S.q)}" oninput="S.q=this.value;renderDeviceSearch()"><div id="device-search-results"></div><div id="parts-brand-list"><p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>`;
+   html=bar('cats',PARTS_NAME)+storeContext()+`<input type="search" id="device-search" aria-label="Поиск картриджей и испарителей" placeholder="Поиск картриджей и испарителей" value="${esc(S.q)}" oninput="S.q=this.value;renderDeviceSearch()"><div id="device-search-results"></div><div id="parts-brand-list"><p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>`;
    const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>S.store===null?priority(a)-priority(b)||a.localeCompare(b,'ru'):(Number(countHere(all.filter(x=>x.brand===b))>0)-Number(countHere(all.filter(x=>x.brand===a))>0))||a.localeCompare(b,'ru'));
    html+=brands.map((b,i)=>{
     const rows=all.filter(x=>x.brand===b),models=new Set(rows.map(x=>x.model)).size;
