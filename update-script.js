@@ -90,7 +90,7 @@ try{return await paged(api,params,size);}catch(e){err=e;if(!canRetryFolder(e))th
 }
 throw err;
 }
-async function fillWarehouseBalances(api, store, missing, storeIndex, log, allowIncompletePreview) {
+async function fillWarehouseBalances(api, store, missing, storeIndex, log, allowIncompletePreview, batchSize=50) {
   async function queryBatch(leaves) {
     const batch = new Map(leaves.map(leaf => [leaf.id, leaf]));
     const params = {
@@ -110,7 +110,7 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
         response = await api.get('nomenclature/balances', jsonParams);
       }
     } catch (error) {
-      if (error.status >= 500 && leaves.length > 1) {
+      if ((error.status >= 500 || [400,414,422].includes(error.status)) && leaves.length > 1) {
         const middle = Math.ceil(leaves.length / 2);
         log(`Warehouse ${store.name}: HTTP ${error.status}; splitting batch of ${leaves.length}`);
         await queryBatch(leaves.slice(0, middle));
@@ -144,8 +144,8 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
     }
   }
 
-  for (let start = 0; start < missing.length; start += 50) {
-    await queryBatch(missing.slice(start, start + 50));
+  for (let start = 0; start < missing.length; start += batchSize) {
+    await queryBatch(missing.slice(start, start + batchSize));
   }
 }
 
@@ -341,4 +341,4 @@ else {const tmp='data.json.saby.tmp';fs.writeFileSync(tmp,JSON.stringify({update
 console.log(`Completed in ${Math.round((Date.now()-started)/1000)} s; requests=${api.count()}`);
 }
 if(require.main===module)main().catch(e=>{console.error('Sync stopped: '+e.message);process.exitCode=1;});
-module.exports={sync,client,paged,STORE_ORDER};
+module.exports={sync,client,paged,STORE_ORDER,WAREHOUSES,fillWarehouseBalances};
