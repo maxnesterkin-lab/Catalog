@@ -63,6 +63,7 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
   box-shadow:0 0 12px #45e1b42a;
 }
 </style>
+<style>.single-group .detail{border:0;padding:0;margin:0}.single-group .fl:last-child{border-bottom:0}</style>
 </head>
 <body>
 <div id="app"></div>
@@ -248,7 +249,8 @@ function renderList(){
     if(q&&!nameHit&&!filtered.length)return;
     const rows=q&&!nameHit?filtered:all;
     const n=all.filter(x=>x.status==='available').length;
-    const opened=S.open===i||(q&&!nameHit);
+    const singleGroup=cat.items.length===1;
+    const opened=singleGroup||S.open===i||(q&&!nameHit);
     const label=n?'Есть в наличии · '+n+' из '+all.length:avail(all.some(x=>x.status==='missing')?'missing':'zero')[0];
     const summaryClass=n?'ok':'no';
     let body=`<div class="meta" style="margin-top:8px">Посмотреть ${cardSubject(cat.name)} и наличие в магазинах</div>`;
@@ -259,6 +261,11 @@ function renderList(){
         const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
         return `<div class="fl"><div>${location.hash==='#xros-photo' && p.name==='VAPORESSO — XROS' && f.name==='XROS 5 MINI — Kit - Retro Orange (Leather Edition)'?'<img src="https://cdn.shopify.com/s/files/1/0071/4758/5626/files/XROS5MINI-retroorange.png?v=1783424670&amp;width=400" alt="Vaporesso XROS 5 Mini Retro Orange" style="display:block;width:120px;max-width:100%;height:145px;object-fit:contain;background:#f3f3f3;border-radius:10px;margin-bottom:8px">':''}<b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
       }).join('')+'</div>';
+    }
+    if(singleGroup){
+      const title=p.name===cat.name?'':`<h3>${esc(p.name)}</h3>`;
+      out.push(`<section class="card single-group">${title}${body}</section>`);
+      return;
     }
     out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(' ')[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta?`<div class="meta">${esc(p.meta)}</div>`:''}<div class="price">${esc(itemPrice(p))}</div><div class="av ${summaryClass}">${label}</div></div></div>${body}</button>`);
   });
