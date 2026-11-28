@@ -149,6 +149,45 @@ async function fillWarehouseBalances(api, store, missing, storeIndex, log, allow
   }
 }
 
+// Track actual API names independently of editorial catalog labels.
+const unitOnlyName = value => /^(?:\d+(?:[.,]\d+)?\s*(?:ml|mg|мл|мг)(?:\s*[/,·-]\s*|\s+)?)+$/i.test(value.trim());
+function syncVariantName(previous, leaf, groupName, stats, log) {
+  const source = typeof leaf.name === 'string' ? leaf.name.trim() : '';
+  const saved = typeof previous.sourceName === 'string' ? previous.sourceName.trim() : '';
+  const report = (kind, details) => {
+    stats[kind]++;
+    if (stats[kind] <= 20) log('Name '+kind+': '+JSON.stringify({id:previous.id, ...details}));
+  };
+  if (!source) {
+    stats.unavailable++;
+    return {};
+  }
+  let name = previous.name;
+  if (saved && saved !== source) {
+    name = source;
+    report('renamed',{before:saved,after:source});
+  } else if (!saved) {
+    stats.baselined++;
+    if (source !== previous.name) {
+      // Preserve editorial labels on migration: the old JSON is not an API-name snapshot.
+      let detail = source;
+      if (detail.toLowerCase().startsWith(groupName.toLowerCase()+' ')) {
+        detail = detail.slice(groupName.length).trim().replace(/^[-–—]\s*/, '');
+      }
+      detail = detail.replace(/\d+(?:[.,]\d+)?\s*(?:ml|mg|мл|мг)(?![\p{L}])/giu,'').replace(/[\s·.,/–—-]+/g,'');
+      if (unitOnlyName(String(previous.name || '')) && /\p{L}/u.test(detail)) {
+        name=source;
+        report('recovered',{before:previous.name,after:source});
+      } else {
+        report('baselineDifferent',{display:previous.name,source});
+      }
+    }
+  }
+  if (unitOnlyName(String(name || '')) || unitOnlyName(source)) {
+    report('suspicious',{display:name,source});
+  }
+  return {name,sourceName:source};
+}
 async function sync(api,prev,log=console.log,{allowIncompletePreview=false}={}){
 await api.login();
 const points=rows(await api.get('point/list',{product:'retail',page:0,pageSize:100}),'salesPoints');
@@ -247,6 +286,7 @@ for (const [si, store] of stores.entries()) {
 }
 appendNewVariants(additions, log);
 const priceDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow'}).format(new Date());
+const nameStats = {baselined:0,baselineDifferent:0,renamed:0,recovered:0,suspicious:0,unavailable:0};
 const categories = workingCategories.map(category => ({
   ...category,
   items: category.items.map(group => {
@@ -261,6 +301,7 @@ const categories = workingCategories.map(category => ({
       const negatives = Object.fromEntries(leaf.stock.flatMap((value, i) => value < 0 ? [[i, value]] : []));
       return {
         ...item,
+        ...syncVariantName(previous, leaf, group.name, nameStats, log),
         storePrices,
         ...(price ? {price, priceStatus:'confirmed'} : {}),
         stores: leaf.stock.flatMap((value, i) => value > 0 ? [i] : []),
@@ -275,6 +316,7 @@ const categories = workingCategories.map(category => ({
   }),
 }));
 const total = categories.reduce((sum, cat) => sum + cat.items.reduce((n, group) => n + group.flavors.length, 0), 0);
+log('Name sync summary: '+JSON.stringify(nameStats));
 log(`Result: ${categories.length} categories; ${total} positions; requests=${api.count()}`);
 return {stores: stores.map(s=>s.name), categories, ...(allowIncompletePreview && unreadFolders.length ? {
   unreadFolders: unreadFolders.map(({hid,name})=>({id:hid,name})),
