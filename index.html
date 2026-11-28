@@ -209,7 +209,7 @@ function renderList(){
     const opened=S.open===i||(q&&!nameHit);
     const label=n?'Есть в наличии · '+n+' из '+all.length:avail(all.some(x=>x.status==='missing')?'missing':'zero')[0];
     const summaryClass=n?'ok':'no';
-    let body='<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>';
+    let body='<div class="meta" style="margin-top:8px">'+(cat.name==='Системы и устройства'?'Нажмите, чтобы увидеть расцветки и другие магазины':'Нажмите, чтобы увидеть вкусы и другие магазины')+'</div>';
     if(opened){
       body='<div class="detail">'+rows.slice().sort((a,b)=>statusRank(a.status)-statusRank(b.status)||a.f.name.localeCompare(b.f.name,'ru')).map(({f,status})=>{
         const [text,cls]=avail(status);
@@ -407,6 +407,66 @@ renderList=function(){
 };
 const css=document.createElement('style');
 css.textContent=`.parts-folder{position:relative;padding-right:34px}.parts-folder b{display:block;font-size:17px;margin-bottom:4px}.parts-folder .meta{display:block;font-size:13px}.parts-chevron{position:absolute;right:14px;top:15px;font-size:23px;color:var(--sh)}.parts-intro{margin:0 0 17px}.parts-product{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.parts-product>div:first-child{min-width:0;flex:1}.parts-product>.price{flex:0 0 auto;font-size:16px;white-space:nowrap}.parts-go{width:100%;margin:-6px 0 18px;padding:9px 12px;background:transparent;border:1px solid var(--ac);border-radius:10px;color:var(--sh);font-size:13px;text-align:center}`;
+document.head.appendChild(css);
+})();
+
+
+/* Test: device model cards. Photos are independent of data.json. */
+(function(){
+'use strict';
+const photos={"ASPIRE / BRUSKO":"dabbler minican-2 minican-3-pro minican-5-pro minican-6 vilter","FOOSE":"rizz","GEEKVAPE":"aegis-b60-boost-2 aegis-boost-3 aegis-hero-5 aegis-hero-q aegis-q-aq an-2 h45-classic h45-hero-2 sonder-q wenax-q-mini wenax-q-ultra wenax-q","JOYETECH":"evio-box","PLONQ":"meta-lite meta-smart","RINCOE":"jellybox-nano-x jellybox-nano","SMOANT":"knight-80 levin pasito-2 pasito-3","SMOK":"novo-2x propod","UWELL":"caliburn-gk2","VAPORESSO":"apex armour-g armour-gs eco-nano luxe-q2-se luxe-q2 luxe-x-pro luxe-x2 luxe-xr-max-2 luxe-xr-max vibe-nano-pro vibe xros-2 xros-3-mini xros-3-nano xros-3 xros-4-mini xros-4-nano xros-4 xros-5-mini xros-5-nano xros-5 xros-6-mini xros-6 xros-cube xros-mini xros-pro-2 xros-pro xtra zero-2","VOOPOO":"argus-g argus-g2-mini argus-p1-s argus-z vmate-e vmate-i2 vmate-i3 vmate-infinity-edition vmate-max vmate-mini vmate-pro-2 vmate-pro-power-edition vmate-pro vthru-pro"};
+function deviceModel(name){
+ let s=String(name).split(/\s+(?:—|–|-)\s+/)[0].trim().toUpperCase().replace(/\s+/g," ").replace(/\s+\(3ML VERSION\)$/,"").replace(/\s+KIT$/,"").trim();
+ const aliases={"AQ (AEGIS Q)":"AEGIS Q (AQ)","AEGIS B60 (AEGIS BOOST 2)":"AEGIS B60 (BOOST 2)","H45 (AEGIS HERO 2)":"H45 (HERO 2)","H45 CLASSIC (AEGIS HERO 2 CLASSIC)":"H45 CLASSIC","VMATE (INFINITY EDITION)":"VMATE INFINITY EDITION","VMATE PRO (POWER EDITION)":"VMATE PRO POWER EDITION","VTHRU PRO (ETERNITY EDITION)":"VTHRU PRO ETERNITY EDITION"};
+ return aliases[s]||s;
+}
+function deviceSlug(s){return String(s).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
+function splitDeviceModels(items){
+ const result=[];
+ for(const p of items){
+   const brand=p.name.split(" — ")[0];
+   if(!p.flavors.length){result.push(p);continue;}
+   const groups=new Map();
+   for(const v of p.flavors){
+      const model=deviceModel(v.name);
+      if(!groups.has(model))groups.set(model,[]);
+      groups.get(model).push(v);
+   }
+   for(const [model,flavors] of groups){
+     const slug=deviceSlug(model);
+     const photo=(photos[brand]||"").split(" ").includes(slug)?"assets/device-photos/"+deviceSlug(brand)+"--"+slug+".webp":null;
+     result.push({...p,name:brand+" — "+model,flavors,devicePhoto:photo});
+   }
+ }
+ return result;
+}
+const previousNormalize=normalize;
+normalize=function(input){
+ const d=previousNormalize(input);
+ const devices=d.categories.find(c=>c.name==='Системы и устройства');
+ if(devices)devices.items=splitDeviceModels(devices.items);
+ return d;
+};
+const previousRenderList=renderList;
+renderList=function(){
+ previousRenderList();
+ if(S.step!=='list'||D.categories[S.cat]?.name!=='Системы и устройства')return;
+ const products=new Map(D.categories[S.cat].items.map(p=>[p.name,p]));
+ for(const card of $('list').querySelectorAll('button.card')){
+   const h=card.querySelector('h3'),pic=card.querySelector('.prod > .pic');
+   if(!h||!pic)continue;
+   const p=products.get(h.textContent);
+   if(!p?.devicePhoto)continue;
+   const img=document.createElement('img');
+   img.alt=p.name;
+   img.loading='lazy';
+   img.decoding='async';
+   img.addEventListener('load',()=>{pic.replaceChildren(img);pic.classList.add('device-photo');},{once:true});
+   img.src=p.devicePhoto;
+ }
+};
+const css=document.createElement('style');
+css.textContent='.pic.device-photo{background:#fff!important;padding:5px;flex-basis:112px;height:90px;box-sizing:border-box}.pic.device-photo img{width:100%;height:100%;object-fit:contain;display:block}';
 document.head.appendChild(css);
 })();
 
