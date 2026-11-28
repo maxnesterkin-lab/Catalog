@@ -54,6 +54,7 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 .store-picker{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);background:var(--card);border-radius:13px;padding:10px 12px;margin:6px 0 18px}.store-picker span{min-width:0}.store-picker b{display:block;font-size:15px}.store-picker small{display:block;font-size:12px;color:var(--mut)}.store-picker button{flex:0 0 auto;border:1px solid var(--ac);border-radius:9px;background:transparent;color:var(--sh);padding:8px 9px;font-size:12px;font-weight:650}.global-store{border-color:var(--ac)}
 </style>
 <style>.av.no::before{content:"● ";color:#e34855}.av.unknown::before{content:"● ";color:#9299a6}</style>
+<link rel="stylesheet" href="category-art.css?v=7cda919">
 </head>
 <body>
 <div id="app"></div>
@@ -186,7 +187,7 @@ function render(){
       return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store===i?' <span class="tag">выбран</span>':''}</b>${sub?`<small>${esc(sub)}</small>`:''}</button>`;
     }).join(''):'<div class="empty">Список магазинов пуст.</div>');
   }else if(S.step==='cats'){
-    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
+    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" data-category="${esc(c.name)}" onclick="pickCat(${i})"><strong>${esc(c.name)}</strong><span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
   }else if(S.step==='deviceBrands'){
     h=bar('cats','Системы и устройства')+storeContext()+deviceBrands().map((brand,i)=>
       '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
