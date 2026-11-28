@@ -213,7 +213,7 @@ function load(){
   Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
-function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands'||step==='partsBrands')S.q='';render();window.scrollTo(0,0)}
+function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands'||step==='partsBrands')S.q='';if(step==='cats')S.globalLimit=80;render();window.scrollTo(0,0)}
 function pickStore(i){S.store=i;S.tab='catalog';go('cats')}
 function pickCat(i){
   S.cat=i; S.q=''; S.deviceBrand=null;
@@ -329,6 +329,35 @@ function renderDeviceSearch(){
     }).join('');
   }).join('');
 }
+// Global search uses the already normalized (public) catalog, including all categories.
+function globalSearchRows(categories,query){
+  const wanted=deviceSearchTokens(query);
+  if(!wanted.length)return [];
+  const rows=[];
+  for(const category of categories)for(const group of category.items)for(const f of group.flavors){
+    const tokens=deviceSearchTokens(category.name+' '+group.name+' '+f.name+' '+(f.displayName||''));
+    if(wanted.every(term=>/^\d/.test(term)?tokens.includes(term):tokens.some(t=>t.includes(term)))){
+      rows.push({category:category.name,group,f});
+    }
+  }
+  return rows;
+}
+function renderGlobalSearch(){
+  const target=$('global-search-results'), folders=$('catalog-folders');
+  if(!target||!folders)return;
+  const query=S.q.trim();
+  folders.hidden=!!query;
+  if(!query){target.innerHTML='';return;}
+  const rows=globalSearchRows(D.categories,query);
+  if(!rows.length){target.innerHTML='<div class="empty">Ничего не найдено. Измените запрос.</div>';return;}
+  rows.sort((a,b)=>statusRank(getStatus(a.f,S.store))-statusRank(getStatus(b.f,S.store))||a.category.localeCompare(b.category,'ru')||a.group.name.localeCompare(b.group.name,'ru')||(a.f.displayName||a.f.name).localeCompare(b.f.displayName||b.f.name,'ru'));
+  const limit=S.globalLimit||80;
+  target.innerHTML='<p class="meta">Найдено: '+rows.length+' · показано: '+Math.min(rows.length,limit)+'</p>'+rows.slice(0,limit).map(({category,group,f})=>{
+    const [label,cls]=avail(getStatus(f,S.store));
+    const context=category===group.name?category:category+' · '+group.name;
+    return '<div class="card"><div class="parts-product"><div><b>'+esc(f.displayName||f.name)+'</b><div class="meta">'+esc(context)+'</div><div class="av '+cls+'">'+esc(label)+'</div><div class="meta">'+esc(stockDetails(f))+'</div></div><div class="price">'+esc(priceRange(pricesFor(f)))+'</div></div></div>';
+  }).join('')+(rows.length>limit?'<button type="button" class="btn ghost" onclick="S.globalLimit=(S.globalLimit||80)+80;renderGlobalSearch()">Показать ещё</button>':'');
+}
 function render(){
   let h='';
   if(S.step==='gate'){
@@ -344,15 +373,15 @@ function render(){
       return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store===i?' <span class="tag">выбран</span>':''}</b>${sub?`<small>${esc(sub)}</small>`:''}</button>`;
     }).join(''):'<div class="empty">Список магазинов пуст.</div>');
   }else if(S.step==='cats'){
-    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${[...D.categories.entries()]
+    h=bar(null,'Каталог SeverVape')+storeContext()+`<input type="search" id="global-search" aria-label="Поиск по всему каталогу" placeholder="Поиск по всему каталогу" value="${esc(S.q)}" oninput="S.q=this.value;S.globalLimit=80;renderGlobalSearch()"><div id="global-search-results"></div><div id="catalog-folders">`+(D.categories.length?`<div class="cats">${[...D.categories.entries()]
       .sort(([,a],[,b])=>b.items.length-a.items.length || a.name.localeCompare(b.name,'ru'))
-      .map(([i,c])=>`<button class="cat" data-category="${esc(c.name)}" onclick="pickCat(${i})"><strong>${esc(c.name)}</strong><span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
+      .map(([i,c])=>`<button class="cat" data-category="${esc(c.name)}" onclick="pickCat(${i})"><strong>${esc(c.name)}</strong><span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>')+'</div>';
   }else if(S.step==='deviceBrands'){
     h=bar('cats','Системы и устройства')+storeContext()+`<input type="search" id="device-search" aria-label="Поиск устройств и комплектующих" placeholder="Поиск устройств и комплектующих" value="${esc(S.q)}" oninput="S.q=this.value;renderDeviceSearch()"><div id="device-search-results"></div>`;
   }else if(S.step==='list'){
     h=bar(BACK.list,S.deviceBrand||D.categories[S.cat].name)+storeContext()+`<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
   }
-  $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();if(S.step==='deviceBrands')renderDeviceSearch();syncBack();
+  $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();if(S.step==='deviceBrands')renderDeviceSearch();if(S.step==='cats')renderGlobalSearch();syncBack();
 }
 function groupCount(count){
   const form=new Intl.PluralRules('ru').select(count);
