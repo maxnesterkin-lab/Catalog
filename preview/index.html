@@ -183,11 +183,34 @@ function labelVariants(categories, overrides) {
   }
 }
 
+ // Presentation only; retain source names for matching, stock, and search.
+function cleanVolumeLabel(value, isGlycerin=false) {
+  let label=value.replace(/\s*\(\s*бустер\s+щелочной\s+в\s+комплекте\s*\)/giu,'').trim();
+  if (isGlycerin && /^(?:глицерин\s+)?пищевой\s+(12|16)\s*(?:ml|мл)$/iu.test(label)) {
+    return 'Глицерин пищевой '+label.match(/(12|16)\s*(?:ml|мл)$/iu)[1]+'ML';
+  }
+  if (/\d\s*(?:ml|мл)(?![\p{L}])/iu.test(label)) {
+    label=label.replace(/(^|[^\p{L}])пищевой(?=$|[^\p{L}])/giu,'$1').replace(/\s{2,}/g,' ').trim();
+  }
+  return label || value;
+}
+function cleanVolumeLabels(categories) {
+  for (const category of categories) {
+    for (const group of category.items) {
+      group.name=cleanVolumeLabel(group.name);
+      for (const item of group.flavors) {
+        const label=item.displayName || item.name;
+        const clean=cleanVolumeLabel(label,category.name==='Глицерин');
+        if (clean!==label) item.displayName=clean;
+      }
+    }
+  }
+}
 function load(){
   S.status='loading';render();
   const dataPromise=fetch('../data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
   const rulesPromise=fetch('overrides.json',{cache:'no-store'}).then(r=>r.ok?r.json():{}).catch(()=>({}));
-  Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
+  Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
 function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
