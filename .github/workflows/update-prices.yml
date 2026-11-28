@@ -1,140 +1,49 @@
 name: Update Saby Retail Data
 
 on:
-  schedule:
-    # 00:20, 08:20 and 16:20 Moscow time.
-    - cron: '20 5,13,21 * * *'
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Publish data.json to main (leave unchecked for preview)'
-        type: boolean
+      batch_size:
+        description: "Warehouse batch size for read-only benchmark"
         required: true
-        default: false
+        default: "100"
+        type: choice
+        options:
+          - "50"
+          - "100"
+          - "200"
 
 permissions:
-  contents: write
-  pages: write
+  contents: read
 
 concurrency:
   group: saby-catalog-update-main
   cancel-in-progress: false
 
 jobs:
-  update-data:
-    if: github.ref == 'refs/heads/main'
+  benchmark:
+    if: github.ref == 'refs/heads/test/fast-saby-stock-20261128' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 345
+    timeout-minutes: 90
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Run script to fetch data from Saby
+      - name: Benchmark warehouse-only stock refresh (no publication)
         env:
-          PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
           SABY_APP_ID: ${{ secrets.SABY_APP_ID }}
           SABY_APP_SECRET: ${{ secrets.SABY_APP_SECRET }}
           SABY_SECRET_KEY: ${{ secrets.SABY_SECRET_KEY }}
+          BATCH_SIZE: ${{ inputs.batch_size || '100' }}
         run: |
           set -euo pipefail
-          git rev-parse HEAD > "$RUNNER_TEMP/saby-base-sha"
-          if [[ "$PUBLISH" == 'true' ]]; then
-            candidate=data.json
-            node update-script.js
-          else
-            candidate="$RUNNER_TEMP/saby-preview.json"
-            node update-script.js "$candidate"
-          fi
-          node - "$candidate" <<'JS'
-          const fs = require('node:fs');
-          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (!Array.isArray(d.stores) || d.stores.length !== 11 || !Array.isArray(d.categories) || !d.categories.length) {
-            throw new Error('Unexpected catalog structure; publication blocked');
-          }
-          let count = 0;
-          for (const c of d.categories) {
-            if (!Array.isArray(c.items)) throw new Error('Invalid items');
-            for (const p of c.items) {
-              if (!Array.isArray(p.flavors)) throw new Error('Invalid positions');
-              for (const f of p.flavors) {
-                if (!Array.isArray(f.stores) || f.stores.some(i => !Number.isInteger(i) || i < 0 || i >= d.stores.length)) throw new Error('Invalid store index');
-                count++;
-              }
-            }
-          }
-          if (!count) throw new Error('Empty catalog');
-          console.log(`Stores: ${d.stores.length}; categories: ${d.categories.length}; positions: ${count}`);
-          JS
-
-      - name: Save preview
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+          node fast-stock-test.js "$RUNNER_TEMP/fast-stock-preview.json" "$BATCH_SIZE"
+      - name: Upload read-only preview and benchmark report
         uses: actions/upload-artifact@v4
         with:
-          name: saby-preview-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/saby-preview.json
+          name: fast-stock-benchmark-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fast-stock-preview.json
+            ${{ runner.temp }}/fast-stock-preview.json.report.json
           if-no-files-found: error
-
-      - name: Commit and push if data changed
-        if: ${{ github.event_name == 'schedule' || inputs.publish }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          base=$(cat "$RUNNER_TEMP/saby-base-sha")
-          if git diff --quiet HEAD -- data.json; then
-            echo 'No changes to data.json.'
-            exit 0
-          fi
-          cp data.json "$RUNNER_TEMP/saby-data-candidate.json"
-          git restore --source=HEAD --staged --worktree -- data.json
-          git fetch origin refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "$base" origin/main; then
-            echo 'Main history changed during update. Publication blocked.'
-            exit 1
-          fi
-          if ! git diff --quiet "$base" origin/main -- data.json update-script.js catalog-assortment.js .github/workflows/update-prices.yml; then
-            echo 'Data or update code changed during update. Publication blocked.'
-            exit 1
-          fi
-          git switch --detach origin/main
-          cp "$RUNNER_TEMP/saby-data-candidate.json" data.json
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- data.json
-          git commit -m 'Auto-update prices and stock from Saby API'
-          git push origin HEAD:refs/heads/main
-
-      - name: Publish the current catalog on GitHub Pages
-        if: ${{ github.event_name == 'schedule' || inputs.publish }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git fetch origin refs/heads/main:refs/remotes/origin/main
-          expected=$(git rev-parse origin/main:data.json)
-          site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url')
-          live_hash() {
-            curl --fail --silent --show-error --location --max-time 25 \
-              "${site%/}/data.json?revision=$expected&attempt=$1" | git hash-object --stdin
-          }
-          if [[ "$(live_hash 0)" == "$expected" ]]; then
-            echo "Catalog is already published."
-            exit 0
-          fi
-          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent
-          for attempt in {1..30}; do
-            sleep 15
-            if [[ "$(live_hash "$attempt")" == "$expected" ]]; then
-              echo "Verified published data.json."
-              exit 0
-            fi
-          done
-          echo "Pages did not serve the expected catalog within the verification window."
-          exit 1
