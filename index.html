@@ -461,12 +461,15 @@ renderList=function(){
    img.alt=p.name;
    img.loading='lazy';
    img.decoding='async';
-   img.addEventListener('load',()=>{pic.replaceChildren(img);pic.classList.add('device-photo');},{once:true});
+   img.addEventListener('load',()=>{pic.replaceChildren(img);pic.classList.remove('device-photo-pending');pic.classList.add('device-photo');},{once:true});
+   img.addEventListener('error',()=>{img.remove();pic.classList.remove('device-photo-pending');},{once:true});
+   pic.classList.add('device-photo-pending');
+   pic.appendChild(img);
    img.src=p.devicePhoto;
  }
 };
 const css=document.createElement('style');
-css.textContent='.pic.device-photo{background:#fff!important;padding:5px;flex-basis:112px;height:90px;box-sizing:border-box}.pic.device-photo img{width:100%;height:100%;object-fit:contain;display:block}';
+css.textContent='.pic.device-photo-pending{position:relative}.pic.device-photo-pending img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0}.pic.device-photo{background:#fff!important;padding:5px;flex-basis:112px;height:90px;box-sizing:border-box}.pic.device-photo img{width:100%;height:100%;object-fit:contain;display:block}';
 document.head.appendChild(css);
 })();
 
