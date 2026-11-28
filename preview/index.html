@@ -137,7 +137,7 @@ function fmtDate(iso){try{return new Date(iso).toLocaleString('ru-RU',{timeZone:
 function stockDetails(f){
   const elsewhere=D.stores.filter((_,i)=>i!==S.store && getStatus(f,i)==='available');
   if(elsewhere.length)return 'В наличии: '+elsewhere.map(s=>s.name).join(', ');
-  if(f.stockStatus.some((s,i)=>i!==S.store && (s==='missing'||s==='negative')))return 'По части магазинов остаток не подтверждён';
+  if(f.stockStatus.some((s,i)=>i!==S.store && s==='missing'))return 'По части магазинов остаток не подтверждён';
   return S.store===null?'Нет в наличии в сети':'В остальных магазинах нет в наличии';
 }
 function foot(){
@@ -149,7 +149,7 @@ function getStatus(f,si){
   const available=si==null ? stocks.includes('available') : stocks[si]==='available';
   if(available)return 'available';
   const scope=si==null?stocks:[stocks[si]];
-  return scope.every(s=>s==='zero')?'zero':'missing';
+  return scope.every(s=>s==='zero'||s==='negative')?'zero':'missing';
 }
 function statusRank(s){return s==='available'?0:s==='zero'?1:2}
 function clearStore(){S.store=null;S.open=null;S.cat=null;S.partsBrand=null;S.partsModel=null;go('cats')}
