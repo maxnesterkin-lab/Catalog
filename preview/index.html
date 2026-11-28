@@ -115,7 +115,7 @@ function normalize(d){
 function load(){
   S.status='loading';render();
   const dataPromise=fetch('../data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
-  dataPromise.then(data=>{D=normalize(data);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();})
+  dataPromise.then(data=>{D=normalize(data);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
 function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
@@ -130,7 +130,15 @@ BACK.deviceBrands='cats';
 function deviceBrands(){return [...new Set(D.categories[S.cat].items.map(p=>p.name.split(' — ')[0]))]}
 function openDeviceBrand(i){S.deviceBrand=i==null?null:deviceBrands()[i];S.q='';go('list')}
 function toggleItem(i){S.open=S.open===i?null:i;renderList()}
-function adult(){go('cats')}
+let photoExamplePending=location.hash==='#xros-photo';
+function showPhotoExample(){
+  if(!photoExamplePending || S.step!=='cats' || S.status!=='ok')return;
+  photoExamplePending=false;
+  const i=D.categories.findIndex(c=>c.name==='Системы и устройства');
+  if(i<0)return;
+  S.cat=i;S.deviceBrand='VAPORESSO';S.q='XROS 5 MINI — Kit - Retro Orange';BACK.list='deviceBrands';go('list');
+}
+function adult(){go('cats');showPhotoExample()}
 function requireAgeConfirmation(){
   if(S.step!=='gate')go('gate');
 }
@@ -245,7 +253,7 @@ function renderList(){
         const [text,cls]=avail(status);
         const pprice=priceRange(pricesFor(f));
         const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
-        return `<div class="fl"><div><b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
+        return `<div class="fl"><div>${location.hash==='#xros-photo' && p.name==='VAPORESSO — XROS' && f.name==='XROS 5 MINI — Kit - Retro Orange (Leather Edition)'?'<img src="https://cdn.shopify.com/s/files/1/0071/4758/5626/files/XROS5MINI-retroorange.png?v=1783424670&amp;width=400" alt="Vaporesso XROS 5 Mini Retro Orange" style="display:block;width:120px;max-width:100%;height:145px;object-fit:contain;background:#f3f3f3;border-radius:10px;margin-bottom:8px">':''}<b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
       }).join('')+'</div>';
     }
     out.push(`<button class="card" onclick="toggleItem(${i})"><div class="prod"><div class="pic" style="background:${esc(p.color)}">${esc(p.name.split(' ')[0])}</div><div><h3>${esc(p.name)}</h3>${p.meta?`<div class="meta">${esc(p.meta)}</div>`:''}<div class="price">${esc(itemPrice(p))}</div><div class="av ${summaryClass}">${label}</div></div></div>${body}</button>`);
