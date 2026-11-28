@@ -91,15 +91,19 @@ const validPrice = x => Number.isFinite(Number(x)) && x !== null && String(x).tr
 let D = {stores:[],categories:[],updated:'',addr:{},previewOnly:false};
 let S = {step:'gate',tab:'catalog',store:null,cat:null,q:'',open:null,status:'loading'};
 const BACK={list:'cats'};
+const hiddenBoosterIds = new Set(['6220','6217']);
+function isBooster(name){
+  return /^\s*(?:бустер(?:ы)?|boosters?)(?:$|[^а-яёa-z])/i.test(name || '');
+}
 function normalize(d){
   if(!d || !Array.isArray(d.stores)||!Array.isArray(d.categories)) throw Error('Некорректный каталог');
   const stores=d.stores.map(s=>typeof s==='string'?{name:s}:{name:String(s.name||''),hours:s.hours});
-  const categories=d.categories.filter(c=>!['Табачные изделия','Системы нагревания табака'].includes(c.name)).map(c=>({name:String(c.name||''),items:(c.items||[]).map(it=>({
+  const categories=d.categories.filter(c=>!isBooster(c.name) && !['Табачные изделия','Системы нагревания табака'].includes(c.name)).map(c=>({name:String(c.name||''),items:(c.items||[]).filter(it=>!isBooster(it.name)).map(it=>({
     name:String(it.name||''),meta:it.meta||'',price:validPrice(it.price)?Number(it.price):null,
     minKnownPrice:validPrice(it.minKnownPrice)?Number(it.minKnownPrice):null,
     maxKnownPrice:validPrice(it.maxKnownPrice)?Number(it.maxKnownPrice):null,
     color:it.color||'#9fd8ff',
-    flavors:(it.flavors||[]).map(f=>({
+    flavors:(it.flavors||[]).filter(f=>!hiddenBoosterIds.has(String(f.id)) && !isBooster(f.name)).map(f=>({
       id:f.id==null?null:String(f.id),name:String(f.name||''),price:validPrice(f.price)?Number(f.price):null,
       storePrices:f.storePrices||{},priceStatus:f.priceStatus||null,stores:Array.isArray(f.stores)?f.stores:[],
       stockStatus:stores.map((_,i)=>{
