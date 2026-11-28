@@ -469,7 +469,7 @@ renderList=function(){
  }
 };
 const css=document.createElement('style');
-css.textContent='.pic.device-photo-pending{position:relative}.pic.device-photo-pending img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0}.pic.device-photo{background:#fff!important;padding:5px;flex-basis:112px;height:90px;box-sizing:border-box}.pic.device-photo img{width:100%;height:100%;object-fit:contain;display:block}';
+css.textContent='.pic.device-photo-pending{position:relative}.pic.device-photo-pending img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0}.pic.device-photo{position:relative;display:block;flex:0 0 112px;width:112px;height:90px;box-sizing:border-box;padding:0;background:#fff!important;overflow:hidden}.pic.device-photo img{position:absolute;inset:5px;width:calc(100% - 10px);height:calc(100% - 10px);min-width:0;min-height:0;max-width:none;max-height:none;object-fit:contain;object-position:center center;display:block}';
 document.head.appendChild(css);
 })();
 
