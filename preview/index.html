@@ -118,26 +118,36 @@ function normalize(d){
   return {stores,categories,updated:d.updated||'',addr:{...storeAddresses,...d.addr},lastPartialReview:d.lastPartialReview,stockReportDate:d.stockReportDate || null};
 }
 const flavorCategories = new Set(['Жидкости','Ароматизаторы','Одноразовые сигареты','Альтернативный табак','Табак и смеси для кальяна']);
-function nameTokens(value) {
-  return value.toLowerCase().replace(/geeek\s+bar/g,'geek bar').match(/[\p{L}\p{N}]+/gu) || [];
-}
 function shortVariantName(group, raw) {
-  const match = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
-  if (!match) return raw;
-  const [, prefix, flavor] = match;
-  const parent = nameTokens(group);
-  const tokens = nameTokens(prefix);
-  if (!tokens.length) return raw;
-  const details = [];
-  let index = 0;
-  for (const token of tokens) {
-    if (token === parent[index]) index++;
-    else details.push(token);
+  const split = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
+  if (!split) {
+    const prefix = group.trim()+' ';
+    if (!raw.toLowerCase().startsWith(prefix.toLowerCase())) return raw;
+    return raw.slice(prefix.length).trim() || raw;
   }
-  const onlyUnits = /^(?:\d+(?:[.,]\d+)?\s*(?:ml|мл|mg|мг)\s*)+$/iu;
-  if (!onlyUnits.test(prefix.trim()) && (index !== parent.length || details.some(t=>!onlyUnits.test(t)))) return raw;
-  const label = flavor.trim();
-  return label ? label[0].toLocaleUpperCase('ru') + label.slice(1) : raw;
+  const [, prefix, flavor] = split;
+  const words = value => value.match(/\d+(?:[.,]\d+)?\s*(?:ml|mg|мл|мг|г|g)(?![\p{L}])|[\p{L}\p{N}]+/giu) || [];
+  const key = word => word.toLowerCase().replace(/\s/g,'').replace('geeek','geek').replace('мл','ml').replace('мг','mg');
+  const parent = new Set(words(group).map(key));
+  const parts = words(prefix);
+  const qualifiers = [];
+  let recognized = false;
+  for (const word of parts) {
+    const token = key(word);
+    if (parent.has(token) || (token==='g' && /^DICH Холодос /i.test(group))) {
+      recognized = true;
+      continue;
+    }
+    const unit = token.match(/^\d+(?:[.,]\d+)?(ml|mg|г|g)$/);
+    if (unit && parts.length===1 && ![...parent].some(t=>t.endsWith(unit[1]))) {
+      recognized = true;
+      continue;
+    }
+    qualifiers.push(word);
+  }
+  if (!recognized) return raw;
+  const title = flavor[0].toLocaleUpperCase('ru')+flavor.slice(1);
+  return qualifiers.length ? title+' · '+qualifiers.join(' ') : title;
 }
 function labelVariants(categories, overrides) {
   for (const category of categories) {
