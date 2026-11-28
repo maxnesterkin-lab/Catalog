@@ -186,7 +186,7 @@ function render(){
       return `<button class="card store" onclick="pickStore(${i})"><b>${esc(s.name)}${S.store===i?' <span class="tag">выбран</span>':''}</b>${sub?`<small>${esc(sub)}</small>`:''}</button>`;
     }).join(''):'<div class="empty">Список магазинов пуст.</div>');
   }else if(S.step==='cats'){
-    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${c.items.length} групп</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
+    h=bar(null,'Каталог SeverVape')+storeContext()+(D.categories.length?`<div class="cats">${D.categories.map((c,i)=>`<button class="cat" onclick="pickCat(${i})">${esc(c.name)}<span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
   }else if(S.step==='deviceBrands'){
     h=bar('cats','Системы и устройства')+storeContext()+deviceBrands().map((brand,i)=>
       '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
@@ -195,6 +195,15 @@ function render(){
     h=bar(BACK.list,S.deviceBrand||D.categories[S.cat].name)+storeContext()+`<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
   }
   $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();syncBack();
+}
+function groupCount(count){
+  const form=new Intl.PluralRules('ru').select(count);
+  return count+' '+({one:'группа',few:'группы'}[form] || 'групп');
+}
+function cardSubject(category){
+  if(category==='Одноразовые сигареты')return 'ароматы';
+  if(['Жидкости','Ароматизаторы','Альтернативный табак','Табак и смеси для кальяна'].includes(category))return 'вкусы';
+  return 'варианты';
 }
 function renderList(){
   const cat=D.categories[S.cat],q=S.q.trim().toLowerCase(),out=[];
@@ -219,7 +228,7 @@ function renderList(){
     const opened=S.open===i||(q&&!nameHit);
     const label=n?'Есть в наличии · '+n+' из '+all.length:avail(all.some(x=>x.status==='missing')?'missing':'zero')[0];
     const summaryClass=n?'ok':'no';
-    let body='<div class="meta" style="margin-top:8px">Нажмите, чтобы увидеть вкусы и другие магазины</div>';
+    let body=`<div class="meta" style="margin-top:8px">Посмотреть ${cardSubject(cat.name)} и наличие в магазинах</div>`;
     if(opened){
       body='<div class="detail">'+rows.slice().sort((a,b)=>statusRank(a.status)-statusRank(b.status)||a.f.name.localeCompare(b.f.name,'ru')).map(({f,status})=>{
         const [text,cls]=avail(status);
