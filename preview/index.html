@@ -117,10 +117,52 @@ function normalize(d){
   }))}));
   return {stores,categories,updated:d.updated||'',addr:{...storeAddresses,...d.addr},lastPartialReview:d.lastPartialReview,stockReportDate:d.stockReportDate || null};
 }
+const flavorCategories = new Set(['Жидкости','Ароматизаторы','Одноразовые сигареты','Альтернативный табак','Табак и смеси для кальяна']);
+function nameTokens(value) {
+  return value.toLowerCase().replace(/geeek\s+bar/g,'geek bar').match(/[\p{L}\p{N}]+/gu) || [];
+}
+function shortVariantName(group, raw) {
+  const match = raw.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
+  if (!match) return raw;
+  const [, prefix, flavor] = match;
+  const parent = nameTokens(group);
+  const tokens = nameTokens(prefix);
+  if (!tokens.length) return raw;
+  const details = [];
+  let index = 0;
+  for (const token of tokens) {
+    if (token === parent[index]) index++;
+    else details.push(token);
+  }
+  const onlyUnits = /^(?:\d+(?:[.,]\d+)?\s*(?:ml|мл|mg|мг)\s*)+$/iu;
+  if (!onlyUnits.test(prefix.trim()) && (index !== parent.length || details.some(t=>!onlyUnits.test(t)))) return raw;
+  const label = flavor.trim();
+  return label ? label[0].toLocaleUpperCase('ru') + label.slice(1) : raw;
+}
+function labelVariants(categories, overrides) {
+  for (const category of categories) {
+    if (!flavorCategories.has(category.name)) continue;
+    for (const group of category.items) {
+      const counts = new Map();
+      for (const item of group.flavors) {
+        const entry = overrides[item.id];
+        item.displayName = entry?.original_name === item.name && typeof entry.display_name === 'string' && entry.display_name.trim()
+          ? entry.display_name.trim() : shortVariantName(group.name,item.name);
+        const key = item.displayName.toLocaleLowerCase('ru');
+        counts.set(key,(counts.get(key) || 0) + 1);
+      }
+      for (const item of group.flavors) {
+        if (counts.get(item.displayName.toLocaleLowerCase('ru')) > 1) item.displayName = item.name;
+      }
+    }
+  }
+}
+
 function load(){
   S.status='loading';render();
   const dataPromise=fetch('../data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
-  dataPromise.then(data=>{D=normalize(data);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
+  const rulesPromise=fetch('overrides.json',{cache:'no-store'}).then(r=>r.ok?r.json():{}).catch(()=>({}));
+  Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
 function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
@@ -245,7 +287,7 @@ function renderList(){
     if(cat.name==='Системы и устройства' && S.deviceBrand && p.name.split(' — ')[0]!==S.deviceBrand)return;
     const all=p.flavors.map((f,fi)=>({f,fi,status:getStatus(f,S.store)}));
     const nameHit=p.name.toLowerCase().includes(q);
-    const filtered=q?all.filter(x=>x.f.name.toLowerCase().includes(q)):all;
+    const filtered=q?all.filter(x=>x.f.name.toLowerCase().includes(q) || x.f.displayName?.toLowerCase().includes(q)):all;
     if(q&&!nameHit&&!filtered.length)return;
     const rows=q&&!nameHit?filtered:all;
     const n=all.filter(x=>x.status==='available').length;
@@ -259,7 +301,7 @@ function renderList(){
         const [text,cls]=avail(status);
         const pprice=priceRange(pricesFor(f));
         const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
-        return `<div class="fl"><div>${location.hash==='#xros-photo' && p.name==='VAPORESSO — XROS' && f.name==='XROS 5 MINI — Kit - Retro Orange (Leather Edition)'?'<img src="https://cdn.shopify.com/s/files/1/0071/4758/5626/files/XROS5MINI-retroorange.png?v=1783424670&amp;width=400" alt="Vaporesso XROS 5 Mini Retro Orange" style="display:block;width:120px;max-width:100%;height:145px;object-fit:contain;background:#f3f3f3;border-radius:10px;margin-bottom:8px">':''}<b>${esc(f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
+        return `<div class="fl"><div>${location.hash==='#xros-photo' && p.name==='VAPORESSO — XROS' && f.name==='XROS 5 MINI — Kit - Retro Orange (Leather Edition)'?'<img src="https://cdn.shopify.com/s/files/1/0071/4758/5626/files/XROS5MINI-retroorange.png?v=1783424670&amp;width=400" alt="Vaporesso XROS 5 Mini Retro Orange" style="display:block;width:120px;max-width:100%;height:145px;object-fit:contain;background:#f3f3f3;border-radius:10px;margin-bottom:8px">':''}<b>${esc(f.displayName || f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
       }).join('')+'</div>';
     }
     if(singleGroup){
