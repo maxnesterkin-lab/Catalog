@@ -213,7 +213,7 @@ function load(){
   Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
-function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats')S.q='';render();window.scrollTo(0,0)}
+function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands')S.q='';render();window.scrollTo(0,0)}
 function pickStore(i){S.store=i;S.tab='catalog';go('cats')}
 function pickCat(i){
   S.cat=i; S.q=''; S.deviceBrand=null;
@@ -283,6 +283,49 @@ function priceRange(values){
   return lo===hi?money(lo):'от '+money(lo)+' до '+money(hi);
 }
 function itemPrice(p){return priceRange(p.flavors.flatMap(pricesFor))}
+// Search across device and accessory sections without changing catalog data.
+function deviceSearchTokens(value){
+  return String(value || '').toLocaleLowerCase('ru').replace(/ё/g,'е')
+    .replace(/(\d),(\d)/g,'$1.$2').match(/\d+(?:\.\d+)?|[\p{L}]+/gu)||[];
+}
+function deviceSearchRows(categories,query){
+  const wanted=deviceSearchTokens(query);
+  if(!wanted.length)return [];
+  const allowed=new Set(['Системы и устройства','Картриджи и испарители','Адаптеры и атомайзеры','Комплектующие для систем']);
+  const rows=[];
+  for(const category of categories){
+    if(!allowed.has(category.name))continue;
+    for(const group of category.items)for(const f of group.flavors){
+      const tokens=deviceSearchTokens(group.name+' '+f.name+' '+(f.displayName||''));
+      if(wanted.every(term=>/^\d/.test(term)?tokens.includes(term):tokens.some(t=>t.includes(term)))){
+        rows.push({category:category.name,group,f});
+      }
+    }
+  }
+  return rows;
+}
+function renderDeviceSearch(){
+  const target=$('device-search-results');
+  if(!target)return;
+  if(!S.q.trim()){
+    target.innerHTML=deviceBrands().map((brand,i)=>
+      '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
+    ).join('')+'<button class="btn ghost" onclick="openDeviceBrand(null)">Все устройства</button>';
+    return;
+  }
+  const matches=deviceSearchRows(D.categories,S.q);
+  if(!matches.length){target.innerHTML='<div class="empty">Ничего не найдено. Измените запрос.</div>';return;}
+  matches.sort((a,b)=>statusRank(getStatus(a.f,S.store))-statusRank(getStatus(b.f,S.store))||a.f.name.localeCompare(b.f.name,'ru'));
+  const sections=[['Системы и устройства'],['Картриджи и испарители','Комплектующие для систем'],['Адаптеры и атомайзеры']];
+  target.innerHTML=sections.map(names=>{
+    const rows=matches.filter(r=>names.includes(r.category));
+    if(!rows.length)return '';
+    return '<p class="meta">'+esc(names[0])+' · '+rows.length+'</p>'+rows.map(({f,group})=>{
+      const [label,cls]=avail(getStatus(f,S.store));
+      return '<div class="card"><div class="parts-product"><div><b>'+esc(f.displayName||f.name)+'</b><div class="meta">'+esc(group.name)+'</div><div class="av '+cls+'">'+esc(label)+'</div><div class="meta">'+esc(stockDetails(f))+'</div></div><div class="price">'+esc(priceRange(pricesFor(f)))+'</div></div></div>';
+    }).join('');
+  }).join('');
+}
 function render(){
   let h='';
   if(S.step==='gate'){
@@ -302,13 +345,11 @@ function render(){
       .sort(([,a],[,b])=>b.items.length-a.items.length || a.name.localeCompare(b.name,'ru'))
       .map(([i,c])=>`<button class="cat" data-category="${esc(c.name)}" onclick="pickCat(${i})"><strong>${esc(c.name)}</strong><span>${groupCount(c.items.length)}</span></button>`).join('')}</div>`:'<div class="empty">Каталог пока пуст.</div>')+(S.store===null?'':'<button class="btn ghost" onclick="go(\'stores\')">Сменить магазин</button>');
   }else if(S.step==='deviceBrands'){
-    h=bar('cats','Системы и устройства')+storeContext()+deviceBrands().map((brand,i)=>
-      '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
-    ).join('')+'<button class="btn ghost" onclick="openDeviceBrand(null)">Все устройства</button>';
+    h=bar('cats','Системы и устройства')+storeContext()+`<input type="search" id="device-search" aria-label="Поиск устройств и комплектующих" placeholder="Поиск устройств и комплектующих" value="${esc(S.q)}" oninput="S.q=this.value;renderDeviceSearch()"><div id="device-search-results"></div>`;
   }else if(S.step==='list'){
     h=bar(BACK.list,S.deviceBrand||D.categories[S.cat].name)+storeContext()+`<input type="search" id="q" placeholder="Поиск" value="${esc(S.q)}" oninput="S.q=this.value;renderList()"><div id="list"></div>`;
   }
-  $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();syncBack();
+  $('app').innerHTML=h+nav()+foot();if(S.step==='list')renderList();if(S.step==='deviceBrands')renderDeviceSearch();syncBack();
 }
 function groupCount(count){
   const form=new Intl.PluralRules('ru').select(count);
