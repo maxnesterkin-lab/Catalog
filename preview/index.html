@@ -213,7 +213,7 @@ function load(){
   Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
-function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands')S.q='';render();window.scrollTo(0,0)}
+function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands'||step==='partsBrands')S.q='';render();window.scrollTo(0,0)}
 function pickStore(i){S.store=i;S.tab='catalog';go('cats')}
 function pickCat(i){
   S.cat=i; S.q=''; S.deviceBrand=null;
@@ -307,7 +307,10 @@ function deviceSearchRows(categories,query){
 function renderDeviceSearch(){
   const target=$('device-search-results');
   if(!target)return;
+  const partBrands=$('parts-brand-list');
+  if(partBrands)partBrands.hidden=!!S.q.trim();
   if(!S.q.trim()){
+    if(partBrands){target.innerHTML='';return;}
     target.innerHTML=deviceBrands().map((brand,i)=>
       '<button class="card parts-folder" onclick="openDeviceBrand('+i+')"><b>'+esc(brand)+'</b><span aria-hidden="true" class="parts-chevron">›</span></button>'
     ).join('')+'<button class="btn ghost" onclick="openDeviceBrand(null)">Все устройства</button>';
@@ -522,12 +525,12 @@ render=function(){
  const element=(txt,meta,click)=>`<button class="card parts-folder" onclick="${click}"><b>${esc(txt)}</b><span class="meta">${esc(meta)}</span><span aria-hidden="true" class="parts-chevron">›</span></button>`;
  let html='';
  if(S.step==='partsBrands'){
-   html=bar('cats',PARTS_NAME)+storeContext()+'<p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>';
+   html=bar('cats',PARTS_NAME)+storeContext()+`<input type="search" id="device-search" aria-label="Поиск устройств и комплектующих" placeholder="Поиск устройств и комплектующих" value="${esc(S.q)}" oninput="S.q=this.value;renderDeviceSearch()"><div id="device-search-results"></div><div id="parts-brand-list"><p class="meta parts-intro">Выберите производителя, затем серию устройства.</p>`;
    const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>S.store===null?priority(a)-priority(b)||a.localeCompare(b,'ru'):(Number(countHere(all.filter(x=>x.brand===b))>0)-Number(countHere(all.filter(x=>x.brand===a))>0))||a.localeCompare(b,'ru'));
    html+=brands.map((b,i)=>{
     const rows=all.filter(x=>x.brand===b),models=new Set(rows.map(x=>x.model)).size;
     return element(b,`${models} серий · ${countHere(rows)} позиций в наличии ${S.store===null?'в сети':'здесь'}`,`openPartsBrand(${i})`);
-   }).join('');
+   }).join('')+'</div>';
  }else if(S.step==='partsModels'){
    html=bar('partsBrands',S.partsBrand)+storeContext()+'<p class="meta parts-intro">Выберите серию. Совместимость с конкретной версией устройства уточняйте у консультанта.</p>';
    const rows=all.filter(x=>x.brand===S.partsBrand);
@@ -549,7 +552,7 @@ render=function(){
      return `<div class="card"><div class="parts-product"><div><b>${esc(f.name)}</b><div class="meta">${esc(group.name)}</div><div class="av ${cls}">${esc(label)}</div><div class="meta">${esc(stockText)}</div></div><div class="price">${esc(price)}</div></div></div>`;
    }).join('')||'<div class="empty">В этой серии пока нет позиций.</div>';
  }
- $('app').innerHTML=html+nav()+foot();syncBack();
+ $('app').innerHTML=html+nav()+foot();if(S.step==='partsBrands')renderDeviceSearch();syncBack();
 };
 window.openPartsBrand=function(i){
  const all=partRows(); const brands=[...new Set(all.map(x=>x.brand))].sort((a,b)=>S.store===null?priority(a)-priority(b)||a.localeCompare(b,'ru'):(Number(all.some(x=>x.brand===b&&getStatus(x.f,S.store)==='available'))-Number(all.some(x=>x.brand===a&&getStatus(x.f,S.store)==='available')))||a.localeCompare(b,'ru'));
