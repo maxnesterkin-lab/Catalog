@@ -210,7 +210,7 @@ function load(){
   S.status='loading';render();
   const dataPromise=fetch('../data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()});
   const rulesPromise=fetch('overrides.json',{cache:'no-store'}).then(r=>r.ok?r.json():{}).catch(()=>({}));
-  Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();showPhotoExample();})
+  Promise.all([dataPromise,rulesPromise]).then(([data,overrides])=>{D=normalize(data);labelVariants(D.categories,overrides || {});cleanVolumeLabels(D.categories);S.store=null;if(S.step==='stores')S.step='cats';S.status='ok';render();})
     .catch(e=>{console.error('Ошибка загрузки данных:',e);S.status='error';render()});
 }
 function go(step){S.step=step;S.tab=step==='stores'?'stores':'catalog';S.open=null;if(step==='cats'||step==='deviceBrands'||step==='partsBrands')S.q='';if(step==='cats')S.globalLimit=80;render();window.scrollTo(0,0)}
@@ -225,15 +225,7 @@ BACK.deviceBrands='cats';
 function deviceBrands(){return [...new Set(D.categories[S.cat].items.map(p=>p.name.split(' — ')[0]))]}
 function openDeviceBrand(i){S.deviceBrand=i==null?null:deviceBrands()[i];S.q='';go('list')}
 function toggleItem(i){S.open=S.open===i?null:i;renderList()}
-let photoExamplePending=location.hash==='#xros-photo';
-function showPhotoExample(){
-  if(!photoExamplePending || S.step!=='cats' || S.status!=='ok')return;
-  photoExamplePending=false;
-  const i=D.categories.findIndex(c=>c.name==='Системы и устройства');
-  if(i<0)return;
-  S.cat=i;S.deviceBrand='VAPORESSO';S.q='XROS 5 MINI — Kit - Retro Orange';BACK.list='deviceBrands';go('list');
-}
-function adult(){go('cats');showPhotoExample()}
+function adult(){go('cats')}
 function requireAgeConfirmation(){
   if(S.step!=='gate')go('gate');
 }
@@ -422,7 +414,7 @@ function renderList(){
         const [text,cls]=avail(status);
         const pprice=priceRange(pricesFor(f));
         const note=f.priceStatus==='manual_fallback'?' · резервная цена':'';
-        return `<div class="fl"><div>${location.hash==='#xros-photo' && p.name==='VAPORESSO — XROS' && f.name==='XROS 5 MINI — Kit - Retro Orange (Leather Edition)'?'<img src="https://cdn.shopify.com/s/files/1/0071/4758/5626/files/XROS5MINI-retroorange.png?v=1783424670&amp;width=400" alt="Vaporesso XROS 5 Mini Retro Orange" style="display:block;width:120px;max-width:100%;height:145px;object-fit:contain;background:#f3f3f3;border-radius:10px;margin-bottom:8px">':''}<b>${esc(f.displayName || f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
+        return `<div class="fl"><div><b>${esc(f.displayName || f.name)}</b><div class="meta">${esc(stockDetails(f))}</div></div><div class="right"><div class="price">${esc(pprice)}${note?`<div class="meta">${esc(note.trim())}</div>`:''}</div><div class="av ${cls}" style="margin:0;white-space:nowrap">${text}</div></div></div>`;
       }).join('')+'</div>';
     }
     if(singleGroup){
@@ -619,6 +611,68 @@ renderList=function(){
 };
 const css=document.createElement('style');
 css.textContent=`.parts-folder{position:relative;padding-right:34px}.parts-folder b{display:block;font-size:17px;margin-bottom:4px}.parts-folder .meta{display:block;font-size:13px}.parts-chevron{position:absolute;right:14px;top:15px;font-size:23px;color:var(--sh)}.parts-intro{margin:0 0 17px}.parts-product{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.parts-product>div:first-child{min-width:0;flex:1}.parts-product>.price{flex:0 0 auto;font-size:16px;white-space:nowrap}.parts-go{width:100%;margin:-6px 0 18px;padding:9px 12px;background:transparent;border:1px solid var(--ac);border-radius:10px;color:var(--sh);font-size:13px;text-align:center}`;
+document.head.appendChild(css);
+})();
+
+/* Device model cards. Photos are independent of data.json. */
+(function(){
+'use strict';
+const photos={"ASPIRE / BRUSKO":"dabbler minican-2 minican-3-pro minican-5-pro minican-6 vilter","FOOSE":"rizz","GEEKVAPE":"aegis-b60-boost-2 aegis-boost-3 aegis-hero-5 aegis-hero-q aegis-q-aq an-2 h45-classic h45-hero-2 sonder-q wenax-q-mini wenax-q-ultra wenax-q","JOYETECH":"evio-box","PLONQ":"meta-lite meta-smart","RINCOE":"jellybox-nano-x jellybox-nano","SMOANT":"knight-80 levin pasito-2 pasito-3","SMOK":"novo-2x propod","UWELL":"caliburn-gk2","VAPORESSO":"apex armour-g armour-gs eco-nano luxe-q2-se luxe-q2 luxe-x-pro luxe-x2 luxe-xr-max-2 luxe-xr-max vibe-nano-pro vibe xros-2 xros-3-mini xros-3-nano xros-3 xros-4-mini xros-4-nano xros-4 xros-5-mini xros-5-nano xros-5 xros-6-mini xros-6 xros-cube xros-mini xros-pro-2 xros-pro xtra zero-2","VOOPOO":"argus-g argus-g2-mini argus-p1-s argus-z vmate-e vmate-i2 vmate-i3 vmate-infinity-edition vmate-max vmate-mini vmate-pro-2 vmate-pro-power-edition vmate-pro vthru-pro"};
+function deviceModel(name){
+ let s=String(name).split(/\s+(?:—|–|-)\s+/)[0].trim().toUpperCase().replace(/\s+/g," ").replace(/\s+\(3ML VERSION\)$/,"").replace(/\s+KIT$/,"").trim();
+ const aliases={"AQ (AEGIS Q)":"AEGIS Q (AQ)","AEGIS B60 (AEGIS BOOST 2)":"AEGIS B60 (BOOST 2)","H45 (AEGIS HERO 2)":"H45 (HERO 2)","H45 CLASSIC (AEGIS HERO 2 CLASSIC)":"H45 CLASSIC","VMATE (INFINITY EDITION)":"VMATE INFINITY EDITION","VMATE PRO (POWER EDITION)":"VMATE PRO POWER EDITION","VTHRU PRO (ETERNITY EDITION)":"VTHRU PRO ETERNITY EDITION"};
+ return aliases[s]||s;
+}
+function deviceSlug(s){return String(s).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
+function splitDeviceModels(items){
+ const result=[];
+ for(const p of items){
+   const brand=p.name.split(" — ")[0];
+   if(!p.flavors.length){result.push(p);continue;}
+   const groups=new Map();
+   for(const v of p.flavors){
+      const model=deviceModel(v.name);
+      if(!groups.has(model))groups.set(model,[]);
+      groups.get(model).push(v);
+   }
+   for(const [model,flavors] of groups){
+     const slug=deviceSlug(model);
+     const photo=(photos[brand]||"").split(" ").includes(slug)?"../assets/device-photos/"+deviceSlug(brand)+"--"+slug+".webp":null;
+     result.push({...p,name:brand+" — "+model,flavors,devicePhoto:photo});
+   }
+ }
+ return result;
+}
+const previousNormalize=normalize;
+normalize=function(input){
+ const d=previousNormalize(input);
+ const devices=d.categories.find(c=>c.name==='Системы и устройства');
+ if(devices)devices.items=splitDeviceModels(devices.items);
+ return d;
+};
+const previousRenderList=renderList;
+renderList=function(){
+ previousRenderList();
+ if(S.step!=='list'||D.categories[S.cat]?.name!=='Системы и устройства')return;
+ const products=new Map(D.categories[S.cat].items.map(p=>[p.name,p]));
+ for(const card of $('list').querySelectorAll('button.card')){
+   const h=card.querySelector('h3'),pic=card.querySelector('.prod > .pic');
+   if(!h||!pic)continue;
+   const p=products.get(h.textContent);
+   if(!p?.devicePhoto)continue;
+   const img=document.createElement('img');
+   img.alt=p.name;
+   img.loading='lazy';
+   img.decoding='async';
+   img.addEventListener('load',()=>{pic.replaceChildren(img);pic.classList.remove('device-photo-pending');pic.classList.add('device-photo');},{once:true});
+   img.addEventListener('error',()=>{img.remove();pic.classList.remove('device-photo-pending');},{once:true});
+   pic.classList.add('device-photo-pending');
+   pic.appendChild(img);
+   img.src=p.devicePhoto;
+ }
+};
+const css=document.createElement('style');
+css.textContent='.pic.device-photo-pending{position:relative}.pic.device-photo-pending img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0}.pic.device-photo{position:relative;display:block;flex:0 0 112px;width:112px;height:90px;box-sizing:border-box;padding:0;background:#fff!important;overflow:hidden}.pic.device-photo img{position:absolute;inset:5px;width:calc(100% - 10px);height:calc(100% - 10px);min-width:0;min-height:0;max-width:none;max-height:none;object-fit:contain;object-position:center center;display:block}';
 document.head.appendChild(css);
 })();
 
