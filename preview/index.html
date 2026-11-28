@@ -55,6 +55,14 @@ input[type=search]{width:100%;background:var(--card);color:var(--tx);border:2px 
 </style>
 <style>.av.no::before{content:"● ";color:#e34855}.av.unknown::before{content:"● ";color:#9299a6}</style>
 <link rel="stylesheet" href="category-art.css?v=7cda919">
+<style>
+#app .card:not(.store), .store-picker:not(:has(+ .cats)){
+  border:1px solid transparent;
+  background:linear-gradient(var(--card),var(--card)) padding-box,
+             linear-gradient(115deg,#68cba8,#65c6e5) border-box;
+  box-shadow:0 0 12px #45e1b42a;
+}
+</style>
 </head>
 <body>
 <div id="app"></div>
