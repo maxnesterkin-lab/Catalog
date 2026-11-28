@@ -149,24 +149,33 @@ function shortVariantName(group, raw) {
   const title = flavor[0].toLocaleUpperCase('ru')+flavor.slice(1);
   return qualifiers.length ? title+' · '+qualifiers.join(' ') : title;
 }
+function cleanFlavorLabel(value, isTravaAroma, isQvks) {
+  let label=value.replace(/\bby\s+electron\b/gi,'').replace(/\s*[·.]\s*$/u,'').trim();
+  if(isTravaAroma) label=label.replace(/^(?:13|17)\s*ML\s*[-–—]\s*/i,'').replace(/\s*·\s*(?:13|17)\s*ML$/i,'').trim();
+  if(isQvks && /^20\s*MG$/i.test(label)) label='Вкус не указан';
+  return label;
+}
 function labelVariants(categories, overrides) {
   for (const category of categories) {
     if (!flavorCategories.has(category.name)) continue;
     for (const group of category.items) {
-      const isTravaAroma=category.name==='Ароматизаторы' && /^Ароматизатор пищевой TRAVA (?:13|13\/17)ML$/i.test(group.name);
+      const isTravaAroma=category.name==='Ароматизаторы' && /^Ароматизатор пищевой TRAVA (?:13|17|13\s*\/\s*17)\s*ML$/i.test(group.name);
+      const isQvks=category.name==='Жидкости' && /^QVKS 30ML$/i.test(group.name);
       if(isTravaAroma) group.name='Ароматизатор пищевой TRAVA 13/17ML';
       const counts = new Map();
       for (const item of group.flavors) {
         const entry = overrides[item.id];
-        item.displayName = entry?.original_name === item.name && typeof entry.display_name === 'string' && entry.display_name.trim()
-          ? entry.display_name.trim() : shortVariantName(group.name,item.name.replace(/\bby\s+electron\b/gi,'').replace(/\s*[·.]\s*$/u,'').trim());
-        if(isTravaAroma) item.displayName=item.displayName.replace(/^(?:13|17)\s*ML\s*[-–—]\s*/i,'').replace(/\s*·\s*(?:13|17)ML$/i,'');
-        if(group.name==='QVKS 30ML' && /^20\s*MG$/i.test(item.displayName)) item.displayName='Вкус не указан';
+        const raw=cleanFlavorLabel(item.name,isTravaAroma,isQvks);
+        const label=entry?.original_name === item.name && typeof entry.display_name === 'string' && entry.display_name.trim()
+          ? entry.display_name.trim() : shortVariantName(group.name,raw);
+        item.displayName=cleanFlavorLabel(label,isTravaAroma,isQvks) || raw || item.name;
         const key = item.displayName.toLocaleLowerCase('ru');
         counts.set(key,(counts.get(key) || 0) + 1);
       }
       for (const item of group.flavors) {
-        if (counts.get(item.displayName.toLocaleLowerCase('ru')) > 1) item.displayName = item.name;
+        if (counts.get(item.displayName.toLocaleLowerCase('ru')) > 1) {
+          item.displayName=cleanFlavorLabel(item.name,isTravaAroma,isQvks) || item.displayName;
+        }
       }
     }
   }
