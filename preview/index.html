@@ -153,11 +153,15 @@ function labelVariants(categories, overrides) {
   for (const category of categories) {
     if (!flavorCategories.has(category.name)) continue;
     for (const group of category.items) {
+      const isTravaAroma=category.name==='Ароматизаторы' && /^Ароматизатор пищевой TRAVA (?:13|13\/17)ML$/i.test(group.name);
+      if(isTravaAroma) group.name='Ароматизатор пищевой TRAVA 13/17ML';
       const counts = new Map();
       for (const item of group.flavors) {
         const entry = overrides[item.id];
         item.displayName = entry?.original_name === item.name && typeof entry.display_name === 'string' && entry.display_name.trim()
-          ? entry.display_name.trim() : shortVariantName(group.name,item.name);
+          ? entry.display_name.trim() : shortVariantName(group.name,item.name.replace(/\bby\s+electron\b/gi,'').replace(/\s*[·.]\s*$/u,'').trim());
+        if(isTravaAroma) item.displayName=item.displayName.replace(/^(?:13|17)\s*ML\s*[-–—]\s*/i,'').replace(/\s*·\s*(?:13|17)ML$/i,'');
+        if(group.name==='QVKS 30ML' && /^20\s*MG$/i.test(item.displayName)) item.displayName='Вкус не указан';
         const key = item.displayName.toLocaleLowerCase('ru');
         counts.set(key,(counts.get(key) || 0) + 1);
       }
